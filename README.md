@@ -1,8 +1,10 @@
 # Rate-my-avatar-korones
 
-Booth system with **Pekora avatar** loading and player-set booth images.
+Booth system with player-set booth images and a dark-themed GUI.
 
 Original booth system by **ywinfe** and **thugshaker**.
+
+![Dark theme preview](docs/dark-theme-preview.png)
 
 ## Files
 
@@ -10,58 +12,62 @@ Original booth system by **ywinfe** and **thugshaker**.
 |---|---|
 | `src/ServerScriptService/BoothServer.server.lua` | `ServerScriptService` (a `Script`) |
 | `src/StarterGui/MainUI/Client.client.lua` | `StarterGui.MainUI.Client` (a `LocalScript`) |
-| `Custom Booth (Pekora).rbxm` | Both scripts already patched in — drag into Studio |
+| `Custom Booth (Modified).rbxm` | Both scripts already patched in — drag into Studio |
 | `Custom Booth.rbxm` | The untouched original model |
 
 ## Setup
 
-1. Insert `Custom Booth (Pekora).rbxm` into Studio, then move its folders to the
+1. Insert `Custom Booth (Modified).rbxm` into Studio, then move its folders to the
    matching services (`ReplicatedStorage.RemoteEvent`, `StarterGui.MainUI`,
    `ServerScriptService.Server`, `Workspace.Booths`). Delete the `DELETE ME` part.
-2. **Game Settings → Security → Allow HTTP Requests: ON.** The Pekora avatar
-   request fails without it.
-3. Play. Walk up to a booth, hold the prompt to claim it.
+2. Play. Walk up to a booth and hold the prompt to claim it.
 
-## What the integration adds
+No HttpService, no external API — nothing extra to enable.
 
-**Server (`BoothServer.server.lua`)**
+## The GUI
 
-- Fetches the claimer's avatar from `pekora.zip/apisite/thumbnails/v1/users/avatar`
-  instead of `GetUserThumbnailAsync`.
-- Retries up to 3 times while the thumbnail state is `Pending`, and caches each
-  user's URL for 5 minutes so re-claiming does not spam the API.
-- Normalises `//host/path` and `/path` responses into absolute URLs.
+The image controls and the dark theme are applied **at run time** by the client
+script, so nothing has to be recoloured or added by hand in Studio. New widgets
+are cloned from the existing ones, so corners, strokes and fonts stay consistent.
+
+| Row | Type | Purpose |
+|---|---|---|
+| `TextLabel` | TextLabel | "Booth Menu" title |
+| `TextBox` | TextBox | booth text entry |
+| `ChangeText` | TextButton | "Send" |
+| `ImageBox` | TextBox | "Enter Image / Decal ID.." *(added)* |
+| `ChangeImage` | TextButton | "Set Image" *(added)* |
+| `Status` | TextLabel | green/red feedback line *(added)* |
+| `UnclaimBooth` | TextButton | red-tinted "Unclaim Booth" |
+
+Enter submits in both text boxes. Row heights, list padding and `UIPadding`
+total **0.971** of the frame, so nothing is cut off by `ClipsDescendants`.
+
+### Palette
+
+| Role | RGB |
+|---|---|
+| Panel background | `12, 12, 14` |
+| Panel outline | `64, 69, 78` |
+| Input background | `24, 25, 29` |
+| Button background | `30, 32, 37` |
+| Unclaim (danger) | `34, 22, 24` bg / `255, 138, 138` text |
+| Text / muted | `236, 238, 242` / `150, 156, 166` |
+
+Edit the `THEME` table at the top of the client script to recolour everything.
+
+## Server behaviour
+
 - `ChangeImage` accepts a bare numeric ID, `rbxassetid://123`, or a link with
-  `?id=123` — it is always rebuilt as `rbxassetid://<digits>`, so a player can
-  never inject an arbitrary URL.
-- `ResetImage` puts the Pekora avatar back.
+  `?id=123` — always rebuilt as `rbxassetid://<digits>`, so a player can never
+  inject an arbitrary URL.
 - Ownership is validated on every remote call, one booth per player, with a
   1-second per-player cooldown.
-- A booth whose owner left, or that was unclaimed while an HTTP/filter call was
-  still yielding, is never overwritten by the late result.
+- Booth text is run through `FilterStringAsync`; set `FILTER_TEXT = false` if
+  that API is unavailable on your platform.
+- A booth unclaimed while a filter call was still yielding is never overwritten
+  by the late result, and a booth whose owner left is always released.
 - Booths added to the folder at run time are wired up automatically.
-
-**Client (`Client.client.lua`)**
-
-The new controls are **built at run time** by cloning the widgets already in
-`MainUI`, so the corners, strokes and fonts match and nothing has to be added by
-hand in Studio:
-
-| Widget | Type | Purpose |
-|---|---|---|
-| `ImageBox` | TextBox | "Enter Image / Decal ID.." |
-| `ChangeImage` | TextButton | "Set Image" |
-| `ResetImage` | TextButton | "Use My Pekora Avatar" |
-| `Status` | TextLabel | green/red feedback line |
-
-Enter submits in both text boxes, and the menu rows are re-ordered through
-`LayoutOrder` so all eight fit inside the frame.
-
-## Note on raw image URLs
-
-`ImageLabel.Image` only accepts a raw `http(s)` URL on Pekora-style clients.
-On live Roblox it must be `rbxassetid://`, so the avatar will fall back to the
-placeholder there while the ID-based `ChangeImage` still works.
 
 Compatible with Roblox/Luau from 2021 and earlier — no `task.*`, attributes, or
 string interpolation.

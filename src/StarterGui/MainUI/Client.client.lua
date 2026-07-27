@@ -2,17 +2,14 @@
 	Booth client script  (StarterGui.MainUI.Client)
 
 	Original booth system by ywinfe and thugshaker.
-	Pekora avatar + image-ID integration.
 
-	This script drives the existing menu (TextBox / ChangeText / UnclaimBooth)
-	AND builds the new image controls at run time by cloning the widgets that
-	are already in MainUI, so nothing has to be added by hand in Studio and the
-	new buttons keep the same corners, strokes and font as the old ones.
+	This script drives the existing menu (TextBox / ChangeText / UnclaimBooth),
+	adds the image-ID controls, and applies a dark theme to every element in
+	MainUI at run time, so nothing has to be recoloured by hand in Studio.
 
 	Created at run time inside MainUI.Frame:
 	    ImageBox      TextBox     "Enter Image / Decal ID.."
 	    ChangeImage   TextButton  "Set Image"
-	    ResetImage    TextButton  "Use My Pekora Avatar"
 	    Status        TextLabel   feedback line
 
 	Written for Roblox/Luau 2021 and earlier.
@@ -36,25 +33,137 @@ local Title = Frame:FindFirstChild("TextLabel")
 local Booths = workspace:WaitForChild("Booths")
 
 -------------------------------------------------------------------------------
--- Configuration
+-- Dark theme palette
 -------------------------------------------------------------------------------
 
-local STATUS_TIME = 4 -- seconds a status message stays on screen
-local GOOD_COLOR = Color3.fromRGB(120, 255, 140)
-local BAD_COLOR = Color3.fromRGB(255, 120, 120)
-local IDLE_COLOR = Color3.fromRGB(235, 235, 235)
+local THEME = {
+	PanelBackground = Color3.fromRGB(12, 12, 14),
+	PanelStroke = Color3.fromRGB(64, 69, 78),
 
--- Row heights (scale of the Frame) so seven rows fit inside it.
-local LAYOUT = {
-	{Name = "TextLabel", Order = 1, Height = 0.14, Width = 1.00},
-	{Name = "TextBox", Order = 2, Height = 0.16, Width = 0.888},
-	{Name = "ChangeText", Order = 3, Height = 0.11, Width = 0.515},
-	{Name = "ImageBox", Order = 4, Height = 0.16, Width = 0.888},
-	{Name = "ChangeImage", Order = 5, Height = 0.11, Width = 0.515},
-	{Name = "ResetImage", Order = 6, Height = 0.10, Width = 0.60},
-	{Name = "Status", Order = 7, Height = 0.08, Width = 0.90},
-	{Name = "UnclaimBooth", Order = 8, Height = 0.10, Width = 0.40},
+	InputBackground = Color3.fromRGB(24, 25, 29),
+	InputStroke = Color3.fromRGB(58, 63, 72),
+
+	ButtonBackground = Color3.fromRGB(30, 32, 37),
+	ButtonStroke = Color3.fromRGB(72, 78, 88),
+
+	DangerBackground = Color3.fromRGB(34, 22, 24),
+	DangerStroke = Color3.fromRGB(120, 62, 66),
+	DangerText = Color3.fromRGB(255, 138, 138),
+
+	Text = Color3.fromRGB(236, 238, 242),
+	MutedText = Color3.fromRGB(150, 156, 166),
+	Placeholder = Color3.fromRGB(110, 116, 126),
+
+	Good = Color3.fromRGB(120, 235, 150),
+	Bad = Color3.fromRGB(255, 130, 130),
 }
+
+local PANEL_CORNER = UDim.new(0, 14)
+local CONTROL_CORNER = UDim.new(0, 8)
+
+local STATUS_TIME = 4 -- seconds a status message stays on screen
+
+-- Row heights (scale of the Frame) so all seven rows fit inside it.
+-- Heights + padding + UIPadding must stay under 1.0, because the Frame has
+-- ClipsDescendants on and would otherwise cut off the last row.
+--   0.835 rows + 6 * 0.016 padding + 0.04 UIPadding = 0.971
+local LAYOUT = {
+	{Name = "TextLabel", Order = 1, Height = 0.130, Width = 1.00},
+	{Name = "TextBox", Order = 2, Height = 0.150, Width = 0.888},
+	{Name = "ChangeText", Order = 3, Height = 0.115, Width = 0.515},
+	{Name = "ImageBox", Order = 4, Height = 0.150, Width = 0.888},
+	{Name = "ChangeImage", Order = 5, Height = 0.115, Width = 0.515},
+	{Name = "Status", Order = 6, Height = 0.075, Width = 0.90},
+	{Name = "UnclaimBooth", Order = 7, Height = 0.100, Width = 0.44},
+}
+
+-------------------------------------------------------------------------------
+-- Theme helpers
+-------------------------------------------------------------------------------
+
+local function GetOrMakeCorner(Element, Radius)
+	local Corner = Element:FindFirstChildOfClass("UICorner")
+	if not Corner then
+		Corner = Instance.new("UICorner")
+		Corner.Parent = Element
+	end
+	Corner.CornerRadius = Radius
+	return Corner
+end
+
+-- UIStroke parented to a Frame / TextButton / TextBox draws the border.
+local function StyleBorder(Element, Color, Thickness)
+	local Stroke = Element:FindFirstChildOfClass("UIStroke")
+	if not Stroke then
+		Stroke = Instance.new("UIStroke")
+		Stroke.Parent = Element
+	end
+	Stroke.Color = Color
+	Stroke.Thickness = Thickness
+	Stroke.Transparency = 0
+	Stroke.ApplyStrokeMode = Enum.ApplyStrokeMode.Border
+	return Stroke
+end
+
+-- UIStroke parented to a TextLabel outlines the glyphs; keep it dark and faint
+-- so light text stays readable without a hard black halo.
+local function StyleTextStroke(Label)
+	local Stroke = Label:FindFirstChildOfClass("UIStroke")
+	if Stroke then
+		Stroke.Color = Color3.fromRGB(0, 0, 0)
+		Stroke.Thickness = 1
+		Stroke.Transparency = 0.55
+	end
+end
+
+local function StyleCaption(Element, Color)
+	Element.TextColor3 = Color
+	Element.TextStrokeTransparency = 1
+
+	local Label = Element:FindFirstChild("TextLabel")
+	if Label and Label:IsA("TextLabel") then
+		Label.BackgroundTransparency = 1
+		Label.TextColor3 = Color
+		Label.TextStrokeTransparency = 1
+		StyleTextStroke(Label)
+	end
+end
+
+local function StyleButton(Button, Background, StrokeColor, TextColor)
+	Button.BackgroundColor3 = Background
+	Button.BackgroundTransparency = 0
+	Button.BorderSizePixel = 0
+	Button.AutoButtonColor = true
+	GetOrMakeCorner(Button, CONTROL_CORNER)
+	StyleBorder(Button, StrokeColor, 2)
+	StyleCaption(Button, TextColor)
+end
+
+local function StyleInput(Box)
+	Box.BackgroundColor3 = THEME.InputBackground
+	Box.BackgroundTransparency = 0
+	Box.BorderSizePixel = 0
+	Box.TextColor3 = THEME.Text
+	Box.TextStrokeTransparency = 1
+	Box.PlaceholderColor3 = THEME.Placeholder
+	GetOrMakeCorner(Box, CONTROL_CORNER)
+	StyleBorder(Box, THEME.InputStroke, 2)
+end
+
+-- Faint top-down sheen, like the reference panel.
+local function AddSheen(Element)
+	if Element:FindFirstChildOfClass("UIGradient") then
+		return
+	end
+
+	local Gradient = Instance.new("UIGradient")
+	Gradient.Rotation = 90
+	Gradient.Color = ColorSequence.new({
+		ColorSequenceKeypoint.new(0, Color3.fromRGB(255, 255, 255)),
+		ColorSequenceKeypoint.new(1, Color3.fromRGB(205, 205, 210)),
+	})
+	Gradient.Parent = Element
+end
 
 -------------------------------------------------------------------------------
 -- Building the new widgets
@@ -115,7 +224,6 @@ local function BuildStatus()
 	Label.Name = "Status"
 	Label.Text = ""
 	Label.BackgroundTransparency = 1
-	Label.TextColor3 = IDLE_COLOR
 	Label.Visible = true
 	Label.Parent = Frame
 	return Label
@@ -123,10 +231,44 @@ end
 
 local ImageBox = CloneTextBox("ImageBox", "Enter Image / Decal ID..")
 local ChangeImage = CloneButton("ChangeImage", "Set Image")
-local ResetImage = CloneButton("ResetImage", "Use My Pekora Avatar")
 local Status = BuildStatus()
 
--- Apply the row sizes and the vertical order.
+-------------------------------------------------------------------------------
+-- Apply the dark theme
+-------------------------------------------------------------------------------
+
+-- Main panel: near-black, rounded, thin grey outline.
+Frame.BackgroundColor3 = THEME.PanelBackground
+Frame.BackgroundTransparency = 0
+Frame.BorderSizePixel = 0
+GetOrMakeCorner(Frame, PANEL_CORNER)
+StyleBorder(Frame, THEME.PanelStroke, 3)
+AddSheen(Frame)
+
+if Title then
+	Title.BackgroundTransparency = 1
+	Title.TextColor3 = THEME.Text
+	Title.TextStrokeTransparency = 1
+	StyleTextStroke(Title)
+end
+
+StyleInput(TextBox)
+StyleInput(ImageBox)
+
+StyleButton(ChangeText, THEME.ButtonBackground, THEME.ButtonStroke, THEME.Text)
+StyleButton(ChangeImage, THEME.ButtonBackground, THEME.ButtonStroke, THEME.Text)
+StyleButton(UnclaimBooth, THEME.DangerBackground, THEME.DangerStroke, THEME.DangerText)
+
+-- Floating open/close button, same panel styling.
+StyleButton(ToggleButton, THEME.PanelBackground, THEME.PanelStroke, THEME.Text)
+GetOrMakeCorner(ToggleButton, CONTROL_CORNER)
+AddSheen(ToggleButton)
+
+Status.TextColor3 = THEME.MutedText
+Status.TextStrokeTransparency = 1
+StyleTextStroke(Status)
+
+-- Row sizes and vertical order.
 for _, Row in ipairs(LAYOUT) do
 	local Element = Frame:FindFirstChild(Row.Name)
 	if Element then
@@ -138,10 +280,18 @@ end
 local ListLayout = Frame:FindFirstChildOfClass("UIListLayout")
 if ListLayout then
 	ListLayout.SortOrder = Enum.SortOrder.LayoutOrder
-	ListLayout.Padding = UDim.new(0.02, 0)
+	ListLayout.Padding = UDim.new(0.016, 0)
 	ListLayout.HorizontalAlignment = Enum.HorizontalAlignment.Center
 	ListLayout.VerticalAlignment = Enum.VerticalAlignment.Top
 end
+
+local Padding = Frame:FindFirstChildOfClass("UIPadding")
+if not Padding then
+	Padding = Instance.new("UIPadding")
+	Padding.Parent = Frame
+end
+Padding.PaddingTop = UDim.new(0.02, 0)
+Padding.PaddingBottom = UDim.new(0.02, 0)
 
 -------------------------------------------------------------------------------
 -- Status helper
@@ -155,11 +305,11 @@ local function SetStatus(Message, IsError)
 
 	Status.Text = Message or ""
 	if IsError == nil then
-		Status.TextColor3 = IDLE_COLOR
+		Status.TextColor3 = THEME.MutedText
 	elseif IsError then
-		Status.TextColor3 = BAD_COLOR
+		Status.TextColor3 = THEME.Bad
 	else
-		Status.TextColor3 = GOOD_COLOR
+		Status.TextColor3 = THEME.Good
 	end
 
 	if Message and Message ~= "" then
@@ -230,7 +380,7 @@ RemoteEvent.OnClientEvent:Connect(function(Argument, Argument2)
 		ToggleButton.Visible = true
 		Frame.Visible = true
 		UpdateButtonText()
-		SetStatus("Booth claimed. Loading your Pekora avatar..")
+		SetStatus("Booth claimed.", false)
 
 	elseif Argument == "BoothUnclaimed" then
 		ToggleButton.Visible = false
@@ -315,12 +465,6 @@ TextBox.FocusLost:Connect(function(EnterPressed)
 		RemoteEvent:FireServer("ChangeText", TextBox.Text)
 		SetStatus("Sending text..")
 	end
-end)
-
-ResetImage.MouseButton1Click:Connect(function()
-	ImageBox.Text = ""
-	RemoteEvent:FireServer("ResetImage")
-	SetStatus("Reloading your Pekora avatar..")
 end)
 
 UnclaimBooth.MouseButton1Click:Connect(function()
