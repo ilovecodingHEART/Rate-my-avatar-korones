@@ -20,3 +20,9 @@ from the real `.rbxm` files. `test_replace_booths.py` executes
 `scripts/ReplaceBooths.commandbar.lua` inside a mock Studio (`studio_mock.lua`)
 built from those same coordinates, covering the dry run, the real run, booth
 structure, position/facing accuracy and idempotency.
+
+`test_replace_in_place.py` is the important one: it parses the real
+`rateava2.rbxl`, rebuilds its Workspace in a mock Studio, and executes
+`scripts/ReplaceBooths.commandbar.lua` against it, checking the dry run, the
+real run, template auto-detection, position/floor/facing accuracy and
+idempotency.

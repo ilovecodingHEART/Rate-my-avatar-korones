@@ -137,6 +137,15 @@ function Inst.GetDescendants(self)
   end
   rec(self); return out
 end
+function Inst.IsDescendantOf(self, other)
+  if other == nil then return false end
+  local cur = rawget(self,"Parent")
+  while cur do
+    if cur == other then return true end
+    cur = rawget(cur,"Parent")
+  end
+  return false
+end
 function Inst.GetFullName(self)
   local parts={}
   local cur=self

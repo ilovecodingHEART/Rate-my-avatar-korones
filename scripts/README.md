@@ -1,55 +1,68 @@
 # ReplaceBooths.commandbar.lua
 
-Swaps all 18 old map booths for the `boothgood` template.
+Swaps the 18 old map booths for the `boothgood` template, in `rateava2.rbxl`.
+
+## Why the first version did nothing
+
+The Command Bar collapses pasted multi-line text into **one line**. The old
+script started with a `--[[ ]]` comment block and used `--` comments
+throughout, so once collapsed the very first `--` commented out the entire
+rest of the line. It "ran" with no error and did nothing.
+
+This version is **one single line with zero comments**, so pasting cannot
+break it. Keep it that way when editing.
 
 ## Use
 
-1. Insert `boothgood.rbxm` into the place (anywhere — it auto-detects).
-2. Open the map so it's in `Workspace`.
-3. Paste the whole script into the **Command Bar** and press Enter.
-4. It runs a **dry run** first and only prints a report. Read it.
-5. Set `DRY_RUN = false` at the top and run again to apply.
+1. Open `rateava2.rbxl`. `boothgood` is already in Workspace, so there is
+   nothing to insert.
+2. Paste the whole line into the **Command Bar** and press Enter.
+3. It is a **dry run**: it only prints a report. Read it.
+4. Change `DRY_RUN = true` to `false` at the very start of the line, paste
+   again, press Enter.
 
-`Ctrl+Z` undoes the entire run.
+`Ctrl+Z` undoes the whole run.
 
-## What it handles
+## Settings
 
-The two booth types are structurally unrelated, so this is a place-and-delete,
-not a property copy:
-
-| | old map booth | boothgood |
-|---|---|---|
-| Parts | Pole, Banner, Tabletop, Carpet, Table | Base, Display, PartNamePlayer, strokes |
-| Display face | Banner, **Front** | Display, **Back** |
-| PrimaryPart | **none** | none |
-
-Because of those differences the script:
-
-- **Never calls `SetPrimaryPartCFrame`** — the map booths have no PrimaryPart,
-  so it would throw. It moves each part by a transform instead.
-- **Rotates 180°** (`FLIP_180`), since Front and Back point opposite ways.
-  Without it every booth faces backwards.
-- **Aligns by ground, not centre.** The old booth is 10.4 studs tall and the
-  new one 10.5, so matching centres would sink/float them. It matches the
-  bounding-box *bottom*, verified to land within 1e-6 studs.
-- Computes bounding boxes with rotation-aware half-extents; the booths sit at
-  yaws of -104°, 166° and 76°, so an axis-aligned box would be wrong.
-- Collects results into `Workspace.Booths`, which is what the server script
-  scans, and is safe to re-run (it won't touch already-converted booths).
-
-## Knobs
+They are the first few assignments on the line.
 
 | Setting | Default | Purpose |
 |---|---|---|
-| `DRY_RUN` | `true` | Report only |
-| `FLIP_180` | `true` | Set `false` if booths face backwards |
-| `HEIGHT_OFFSET` | `0` | Raise/lower all booths |
-| `FORWARD_OFFSET` | `0` | Push booths forward/back |
-| `DELETE_OLD` | `true` | `false` moves old booths to a backup folder |
+| `DRY_RUN` | `true` | Report only, change nothing |
+| `FLIP_180` | `true` | Set `false` if booths end up facing backwards |
+| `DELETE_OLD` | `true` | `false` moves old booths to `OldBooths_Backup` |
+| `HEIGHT_OFFSET` | `0` | Raise / lower every booth |
+| `FORWARD_OFFSET` | `0` | Push every booth forward / back |
+
+## What it handles
+
+The two booth types are unrelated, so this places new booths and deletes the
+old, rather than editing properties:
+
+| | old booth | boothgood |
+|---|---|---|
+| Parts | Pole, Banner, Tabletop, Carpet, Table | Base, Display, PartNamePlayer, strokes |
+| Display face | Banner, **Front** | Display, **Back** |
+| PrimaryPart | none | none |
+| Height | 10.4 studs | 10.5 studs |
+
+- **No `SetPrimaryPartCFrame`** — neither model has a PrimaryPart, so it would
+  throw. Each part is moved by a transform instead.
+- **180° flip**, because Front and Back point opposite ways. Without it all 18
+  booths face backwards into their own tables.
+- **Ground alignment, not centre** — the two models differ in height, so
+  matching centres would sink or float them. Verified exact to 0.00000 studs.
+- Rotation-aware bounding boxes; the booths sit at yaws of 76°, -14° and -104°.
+- Skips the `boothgood` template itself, and refuses to run if the template has
+  been moved inside the `Booths` folder.
+- Results go to `Workspace.Booths`, which the server script scans.
+- Safe to re-run: already-converted booths are ignored.
 
 ## Tests
 
 ```bash
-python tests/test_replace_geometry.py   # placement math vs real coordinates
-python tests/test_replace_booths.py     # runs the Lua script in a mock Studio
+python tests/test_replace_in_place.py   # runs the script against rateava2.rbxl (17 checks)
+python tests/test_replace_geometry.py   # placement math vs the rbxm map
+python tests/test_replace_booths.py     # the rbxm map in a mock Studio
 ```
