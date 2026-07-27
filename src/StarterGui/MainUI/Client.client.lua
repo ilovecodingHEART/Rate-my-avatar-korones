@@ -50,6 +50,11 @@ local THEME = {
 	DangerStroke = Color3.fromRGB(120, 62, 66),
 	DangerText = Color3.fromRGB(255, 138, 138),
 
+	-- "Unlock" state for the locked image button.
+	LockedBackground = Color3.fromRGB(42, 34, 16),
+	LockedStroke = Color3.fromRGB(150, 118, 44),
+	LockedText = Color3.fromRGB(255, 214, 122),
+
 	Text = Color3.fromRGB(236, 238, 242),
 	MutedText = Color3.fromRGB(150, 156, 166),
 	Placeholder = Color3.fromRGB(110, 116, 126),
@@ -294,6 +299,39 @@ Padding.PaddingTop = UDim.new(0.02, 0)
 Padding.PaddingBottom = UDim.new(0.02, 0)
 
 -------------------------------------------------------------------------------
+-- Paywall state
+-------------------------------------------------------------------------------
+
+-- Assume locked until the server says otherwise, so the unlock prompt is never
+-- skipped by a client that missed the first message.
+local Paywall = {Enabled = true, Owns = false, Name = "required item"}
+
+local function SetButtonCaption(Button, Caption)
+	local Label = Button:FindFirstChild("TextLabel")
+	if Label then
+		Label.Text = Caption
+	else
+		Button.Text = Caption
+	end
+end
+
+local function ApplyPaywallState()
+	local Locked = Paywall.Enabled and not Paywall.Owns
+
+	if Locked then
+		SetButtonCaption(ChangeImage, "Unlock Image Uploads")
+		StyleButton(ChangeImage, THEME.LockedBackground, THEME.LockedStroke, THEME.LockedText)
+		ImageBox.PlaceholderText = "Requires " .. tostring(Paywall.Name) .. ".."
+		ImageBox.TextEditable = false
+	else
+		SetButtonCaption(ChangeImage, "Set Image")
+		StyleButton(ChangeImage, THEME.ButtonBackground, THEME.ButtonStroke, THEME.Text)
+		ImageBox.PlaceholderText = "Enter Image / Decal ID.."
+		ImageBox.TextEditable = true
+	end
+end
+
+-------------------------------------------------------------------------------
 -- Status helper
 -------------------------------------------------------------------------------
 
@@ -396,6 +434,16 @@ RemoteEvent.OnClientEvent:Connect(function(Argument, Argument2)
 	elseif Argument == "EnablePrompts" then
 		SetPromptsEnabled(true)
 
+	elseif Argument == "PaywallState" then
+		if type(Argument2) == "table" then
+			Paywall.Enabled = (Argument2.Enabled ~= false)
+			Paywall.Owns = (Argument2.Owns == true)
+			if Argument2.Name then
+				Paywall.Name = Argument2.Name
+			end
+			ApplyPaywallState()
+		end
+
 	elseif Argument == "ImageChanged" then
 		SetStatus("Image updated.", false)
 
@@ -437,7 +485,14 @@ local function ReadImageId(Input)
 		or string.match(Input, "[?&]id=(%d+)")
 end
 
-ChangeImage.MouseButton1Click:Connect(function()
+local function SubmitImage()
+	-- While locked, the button opens the store instead of sending an ID.
+	if Paywall.Enabled and not Paywall.Owns then
+		RemoteEvent:FireServer("PromptPurchase")
+		SetStatus("Opening the store..")
+		return
+	end
+
 	local Id = ReadImageId(ImageBox.Text)
 	if not Id then
 		SetStatus("Enter a numeric image / decal ID.", true)
@@ -446,17 +501,13 @@ ChangeImage.MouseButton1Click:Connect(function()
 
 	RemoteEvent:FireServer("ChangeImage", Id)
 	SetStatus("Sending image..")
-end)
+end
+
+ChangeImage.MouseButton1Click:Connect(SubmitImage)
 
 ImageBox.FocusLost:Connect(function(EnterPressed)
 	if EnterPressed then
-		local Id = ReadImageId(ImageBox.Text)
-		if Id then
-			RemoteEvent:FireServer("ChangeImage", Id)
-			SetStatus("Sending image..")
-		else
-			SetStatus("Enter a numeric image / decal ID.", true)
-		end
+		SubmitImage()
 	end
 end)
 
@@ -480,6 +531,11 @@ Frame.Visible = false
 ToggleButton.Visible = false
 SetStatus("")
 UpdateButtonText()
+ApplyPaywallState()
+
+-- Ask again in case this LocalScript loaded after the server's first message
+-- (respawn with ResetOnSpawn, or a slow first join).
+RemoteEvent:FireServer("CheckPaywall")
 
 -- Booths this client already owns (rejoin / respawn with ResetOnSpawn on).
 local OwnedBooth = Player:FindFirstChild("OwnedBooth")
