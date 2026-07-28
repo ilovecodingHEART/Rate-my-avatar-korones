@@ -71,6 +71,7 @@ local THEME = {
 	-- Rank badges. Same weight as the rest of the palette so the panel still
 	-- reads as one piece, just with the rank obvious at a glance.
 	OwnerBadge = Color3.fromRGB(255, 196, 92),
+	DevBadge = Color3.fromRGB(120, 235, 160),
 	AdminBadge = Color3.fromRGB(214, 170, 255),
 	ModBadge = Color3.fromRGB(130, 200, 255),
 	PlayerBadge = Color3.fromRGB(150, 156, 166),
@@ -329,7 +330,8 @@ Padding.PaddingBottom = UDim.new(0.02, 0)
 local HUD = {
 	MinWidth = 104,
 	MinHeight = 34,
-	Gap = 0.085,
+	-- Pixels, not scale, so the spacing always matches the button height.
+	Pad = 8,
 }
 
 -- Settled once, before anything is placed, so every button in the stack is
@@ -342,13 +344,25 @@ ToggleButton.Size = UDim2.new(
 HUD.Size = ToggleButton.Size
 HUD.Anchor = ToggleButton.Position
 
+--[[
+	Stacked upwards from the toggle.
+
+	The spacing used to be pure scale while the height had a pixel floor, so on
+	a short window the gap shrank below the button and they piled on top of
+	each other - visibly, in the bug report. The offset now carries the spacing
+	in pixels, so the gap and the height are in the same units and cannot drift
+	apart at any window size.
+--]]
 local function PlaceHudButton(button, slot)
 	button.Size = HUD.Size
+
+	local step = math.max(HUD.MinHeight, HUD.Size.Y.Offset) + HUD.Pad
+
 	button.Position = UDim2.new(
 		HUD.Anchor.X.Scale,
 		HUD.Anchor.X.Offset,
-		HUD.Anchor.Y.Scale - HUD.Gap * slot,
-		HUD.Anchor.Y.Offset
+		HUD.Anchor.Y.Scale,
+		HUD.Anchor.Y.Offset - step * slot
 	)
 end
 
@@ -722,16 +736,26 @@ local IsAdminClient = false
 local MyRank = 0
 local MyRankName = "Player"
 
-local RANK_MOD = 1
-local RANK_ADMIN = 2
-local RANK_OWNER = 3
+--[[
+	Must match the server's numbers exactly. They are compared with >= on both
+	sides, so Developer slotting in at 3 gives it every Admin power without any
+	other line needing to know it exists.
+--]]
+local RANK = {
+	Mod = 1,
+	Admin = 2,
+	Dev = 3,
+	Owner = 4,
+}
 
 local function RankColour(rank)
-	if rank >= RANK_OWNER then
+	if rank >= RANK.Owner then
 		return THEME.OwnerBadge
-	elseif rank >= RANK_ADMIN then
+	elseif rank >= RANK.Dev then
+		return THEME.DevBadge
+	elseif rank >= RANK.Admin then
 		return THEME.AdminBadge
-	elseif rank >= RANK_MOD then
+	elseif rank >= RANK.Mod then
 		return THEME.ModBadge
 	end
 	return THEME.PlayerBadge
@@ -764,29 +788,101 @@ if not AdminFrame then
 end
 AdminFrame.Visible = false
 --[[
-	Sized in scale so it fits any window, with a floor in pixels so it cannot
-	collapse on a small one.
+	Sized in scale, with a floor so it stays readable and a ceiling so it can
+	never be bigger than the window it is drawn in.
 
-	Everything inside the panel is positioned as a fraction of the panel, so
-	the whole thing shrinks together. On a small window that took the greeting
-	card down to about 84x32 and the status line to 10px, which is where the
-	squashed, overlapping look in the screenshots came from: the layout was not
-	wrong so much as scaled below the size its text could survive.
+	The floor on its own was a mistake, and a worse bug than the one it fixed:
+	a 720x400 minimum on a 617x326 window put the panel over both edges, so the
+	close button sat off screen. A minimum that ignores the window is not a
+	minimum, it is an overflow.
 
-	A UISizeConstraint holds it at a readable minimum and lets it grow from
-	there. The panel is centred, so on a window narrower than the minimum it
-	overhangs evenly rather than pinning to a corner.
+	UISizeConstraint takes a MaxSize as well, so the two together say what was
+	actually meant: be at least this readable, never wider than the screen.
+	Roblox applies MaxSize after MinSize, so the cap wins on a small window,
+	which is the behaviour we want.
+
+	ScreenGui.AbsoluteSize is watched rather than assumed, because the window
+	can be resized mid-session and a cap computed once at startup would be
+	wrong the moment somebody drags the window.
 --]]
 AdminFrame.Size = UDim2.new(0.72, 0, 0.68, 0)
 AdminFrame.Position = UDim2.new(0.5, 0, 0.5, 0)
-do
-	local minSize = AdminFrame:FindFirstChildOfClass("UISizeConstraint")
-	if not minSize then
-		minSize = Instance.new("UISizeConstraint")
-		minSize.Parent = AdminFrame
+
+--[[
+	The floating windows FitWindowsToScreen has to keep on screen.
+
+	Holds the frames themselves rather than a flag, because the report window
+	is created hundreds of lines below this point and naming it directly here
+	would read as a nil global until then.
+--]]
+local SizeLimits = {}
+
+-- Keeps both windows inside whatever the screen currently is.
+--[[
+	Keeps both windows on screen AND readable, which are two different jobs.
+
+	Capping the size stops the panel hanging off the edge, but on its own it
+	just squashes the contents instead: at 617x326 the rank label came out
+	14px tall and the status line 13px, which is unreadable however neatly it
+	fits. Scale factors do not care that text has a minimum useful size.
+
+	So the panel keeps its full DESIGN size and a UIScale shrinks the whole
+	thing as one piece when the window cannot fit it. Every proportion inside
+	is preserved and the text shrinks evenly with everything else, instead of
+	rows collapsing at different rates and landing on top of each other.
+
+	Below MIN_SCALE it stops shrinking and simply clips, because past that
+	point it is too small to use and hiding that helps nobody.
+--]]
+--[[
+	The design size the panel is laid out at before scaling.
+
+	Deliberately modest. A bigger canvas looks roomier on a large monitor but
+	has to scale down further on a small one, and everything inside scales with
+	it - so an ambitious design size is what turns a 28px row into 17px of
+	unreadable text on a 617x326 window. 736x400 is the largest that still
+	keeps the thinnest rows legible at the smallest window worth supporting.
+--]]
+local WINDOW = {
+	AdminW = 736, AdminH = 400,
+	ReportW = 560, ReportH = 340,
+	MinScale = 0.5,
+}
+
+local function ScaleFor(frame, wantW, wantH, screen)
+	local scale = frame:FindFirstChildOfClass("UIScale")
+	if not scale then
+		scale = Instance.new("UIScale")
+		scale.Parent = frame
 	end
-	minSize.MinSize = Vector2.new(720, 400)
+
+	-- Whichever axis is tighter decides, so it never overflows the other.
+	local fit = math.min((screen.X - 16) / wantW, (screen.Y - 16) / wantH, 1)
+	scale.Scale = math.max(fit, WINDOW.MinScale)
+	return scale
 end
+
+local function FitWindowsToScreen()
+	local screen = ScreenGui.AbsoluteSize
+	if screen.X <= 0 or screen.Y <= 0 then
+		return
+	end
+
+	-- Fixed pixel sizes, then scaled. Laying out at a known size is what makes
+	-- the proportions predictable at every window.
+	AdminFrame.Size = UDim2.new(0, WINDOW.AdminW, 0, WINDOW.AdminH)
+	ScaleFor(AdminFrame, WINDOW.AdminW, WINDOW.AdminH, screen)
+
+	-- The report window is built much further down the file, so it is fetched
+	-- from the table rather than named directly: a bare `ReportFrame` here
+	-- reads as a nil global until that local exists, which is a crash the
+	-- moment the window is resized before the report UI is built.
+	if SizeLimits.Report then
+		SizeLimits.Report.Size = UDim2.new(0, WINDOW.ReportW, 0, WINDOW.ReportH)
+		ScaleFor(SizeLimits.Report, WINDOW.ReportW, WINDOW.ReportH, screen)
+	end
+end
+
 AdminFrame.AnchorPoint = Vector2.new(0.5, 0.5)
 AdminFrame.BackgroundColor3 = THEME.PanelBackground
 AdminFrame.BorderSizePixel = 0
@@ -853,16 +949,26 @@ StyleBorder(AdminClose, THEME.ShopOutline, 3)
 --[[
 	Where the greeting's text column starts, as a fraction of the card width.
 
-	The headshot is a circle sized off the card height, so how far across it
-	reaches depends on the card's aspect ratio. Working that out here once, from
-	the same numbers the widgets use, is what stops the picture and the "Hello,"
-	label sliding into each other when either is adjusted.
+	Worked out rather than typed. The headshot is a circle sized off the card
+	HEIGHT but positioned as a fraction of the card WIDTH, so how far across it
+	reaches depends on the card's aspect ratio - which means a hand-picked
+	number silently goes wrong the moment the card is resized. That has now
+	happened twice.
 
-	    card      0.245 wide x 0.185 tall  of a 922 x 490 panel  = 226 x 91
-	    headshot  0.72 of the height       = 65px, starting 0.05 * 226 = 11px
-	    so it ends at 76px, which is 0.34 of the card
+	    reach = inset + height * headScale / cardWidth
+
+	so deriving it from the same three numbers the widgets use keeps the text
+	clear of the picture whatever the card becomes.
 --]]
-local GREET_TEXT_X = 0.40
+local GREET = {
+	W = 0.245, H = 0.225,
+	HeadScale = 0.72,
+	HeadInset = 0.05,
+}
+
+GREET.TextX = GREET.HeadInset
+	+ (GREET.H * GREET.HeadScale) / (GREET.W * (16 / 9))
+	+ 0.06
 
 local Greet = AdminFrame:FindFirstChild("Greet")
 if not Greet then
@@ -870,7 +976,7 @@ if not Greet then
 	Greet.Name = "Greet"
 	Greet.Parent = AdminFrame
 end
-Greet.Size = UDim2.new(0.245, 0, 0.205, 0)
+Greet.Size = UDim2.new(GREET.W, 0, GREET.H, 0)
 Greet.Position = UDim2.new(0.022, 0, 0.035, 0)
 Greet.BackgroundColor3 = THEME.CardBackground
 Greet.BorderSizePixel = 0
@@ -891,11 +997,11 @@ end
 	of a 98px card it is 74px wide starting 14px in, which ran under text that
 	began at 82px.
 
-	GREET_TEXT_X is derived from the same figures below, so the text column
+	GREET.TextX is derived from the same figures below, so the text column
 	always starts clear of the picture no matter how the card is resized.
 --]]
-GreetImage.Size = UDim2.new(0, 0, 0.72, 0)
-GreetImage.Position = UDim2.new(0.05, 0, 0.5, 0)
+GreetImage.Size = UDim2.new(0, 0, GREET.HeadScale, 0)
+GreetImage.Position = UDim2.new(GREET.HeadInset, 0, 0.5, 0)
 GreetImage.AnchorPoint = Vector2.new(0, 0.5)
 GreetImage.BackgroundColor3 = THEME.InputBackground
 GreetImage.BorderSizePixel = 0
@@ -915,19 +1021,21 @@ do
 end
 
 -- Shown behind the picture, so there is never an empty hole while it loads.
-local GreetInitial = GreetImage:FindFirstChild("Initial")
-if not GreetInitial then
-	GreetInitial = Instance.new("TextLabel")
-	GreetInitial.Name = "Initial"
-	GreetInitial.Parent = GreetImage
+do
+	local init = GreetImage:FindFirstChild("Initial")
+	if not init then
+		init = Instance.new("TextLabel")
+		init.Name = "Initial"
+		init.Parent = GreetImage
+	end
 end
-GreetInitial.Size = UDim2.new(1, 0, 1, 0)
-GreetInitial.BackgroundTransparency = 1
-GreetInitial.Text = string.upper(string.sub(Player.Name, 1, 1))
-GreetInitial.TextScaled = true
-GreetInitial.Font = TITLE_FONT
-GreetInitial.TextColor3 = THEME.MutedText
-GreetInitial.ZIndex = 4
+GreetImage.Initial.Size = UDim2.new(1, 0, 1, 0)
+GreetImage.Initial.BackgroundTransparency = 1
+GreetImage.Initial.Text = string.upper(string.sub(Player.Name, 1, 1))
+GreetImage.Initial.TextScaled = true
+GreetImage.Initial.Font = TITLE_FONT
+GreetImage.Initial.TextColor3 = THEME.MutedText
+GreetImage.Initial.ZIndex = 4
 
 local GreetHello = Greet:FindFirstChild("Hello")
 if not GreetHello then
@@ -935,8 +1043,8 @@ if not GreetHello then
 	GreetHello.Name = "Hello"
 	GreetHello.Parent = Greet
 end
-GreetHello.Size = UDim2.new(1 - GREET_TEXT_X - 0.04, 0, 0.36, 0)
-GreetHello.Position = UDim2.new(GREET_TEXT_X, 0, 0.16, 0)
+GreetHello.Size = UDim2.new(1 - GREET.TextX - 0.04, 0, 0.36, 0)
+GreetHello.Position = UDim2.new(GREET.TextX, 0, 0.16, 0)
 GreetHello.BackgroundTransparency = 1
 GreetHello.Text = "Hello, " .. Player.Name .. "."
 GreetHello.TextScaled = true
@@ -951,8 +1059,8 @@ if not GreetRank then
 	GreetRank.Name = "Rank"
 	GreetRank.Parent = Greet
 end
-GreetRank.Size = UDim2.new(1 - GREET_TEXT_X - 0.04, 0, 0.30, 0)
-GreetRank.Position = UDim2.new(GREET_TEXT_X, 0, 0.54, 0)
+GreetRank.Size = UDim2.new(1 - GREET.TextX - 0.04, 0, 0.34, 0)
+GreetRank.Position = UDim2.new(GREET.TextX, 0, 0.52, 0)
 GreetRank.BackgroundTransparency = 1
 GreetRank.Text = "Player"
 GreetRank.TextScaled = true
@@ -969,7 +1077,7 @@ local function SetGreeting(name, rankName, rank)
 	GreetHello.Text = "Hello, " .. name .. "."
 	GreetRank.Text = rankName
 	GreetRank.TextColor3 = RankColour(rank or 0)
-	GreetInitial.Text = string.upper(string.sub(name, 1, 1))
+	GreetImage.Initial.Text = string.upper(string.sub(name, 1, 1))
 end
 
 -- Last resort if the proxy never answers: ask the client's own Roblox session.
@@ -991,7 +1099,7 @@ end
 
 local function ApplyGreetHeadshot(url)
 	GreetImage.Image = url or ""
-	GreetInitial.Visible = (url == nil or url == "")
+	GreetImage.Initial.Visible = (url == nil or url == "")
 end
 
 -------------------------------------------------------------------------------
@@ -1004,12 +1112,12 @@ end
 --]]
 
 local PAGES = {
-	{Name = "Home", MinRank = RANK_MOD},
-	{Name = "Players", MinRank = RANK_MOD},
-	{Name = "Reports", MinRank = RANK_MOD},
-	{Name = "Staff", MinRank = RANK_ADMIN},
-	{Name = "Shop", MinRank = RANK_ADMIN},
-	{Name = "Trolling", MinRank = RANK_ADMIN},
+	{Name = "Home", MinRank = RANK.Mod},
+	{Name = "Players", MinRank = RANK.Mod},
+	{Name = "Reports", MinRank = RANK.Mod},
+	{Name = "Staff", MinRank = RANK.Admin},
+	{Name = "Shop", MinRank = RANK.Admin},
+	{Name = "Trolling", MinRank = RANK.Admin},
 }
 
 local PageNav = AdminFrame:FindFirstChild("PageNav")
@@ -1018,8 +1126,8 @@ if not PageNav then
 	PageNav.Name = "PageNav"
 	PageNav.Parent = AdminFrame
 end
-PageNav.Size = UDim2.new(0.245, 0, 0.60, 0)
-PageNav.Position = UDim2.new(0.022, 0, 0.275, 0)
+PageNav.Size = UDim2.new(0.245, 0, 0.58, 0)
+PageNav.Position = UDim2.new(0.022, 0, 0.295, 0)
 PageNav.BackgroundTransparency = 1
 PageNav.ZIndex = 3
 
@@ -1057,8 +1165,8 @@ if not AdminStatus then
 	AdminStatus.Name = "AdminStatus"
 	AdminStatus.Parent = AdminFrame
 end
-AdminStatus.Size = UDim2.new(0.95, 0, 0.06, 0)
-AdminStatus.Position = UDim2.new(0.5, 0, 0.955, 0)
+AdminStatus.Size = UDim2.new(0.95, 0, 0.075, 0)
+AdminStatus.Position = UDim2.new(0.5, 0, 0.952, 0)
 AdminStatus.AnchorPoint = Vector2.new(0.5, 0.5)
 AdminStatus.BackgroundTransparency = 1
 AdminStatus.Text = ""
@@ -1222,6 +1330,9 @@ end
 	wired are simply remembered here.
 --]]
 local Wired = {}
+
+-- The two grids that command buttons get parented into, one per page.
+local Grids = {}
 
 local function MakeSmallButton(parent, name, caption, background, textColour)
 	local b = parent:FindFirstChild(name)
@@ -1529,24 +1640,24 @@ ActionInput.Visible = true
 ActionInput.ZIndex = 5
 StyleInput(ActionInput)
 
-local ActionGrid = MakeScroller(
+Grids.Action = MakeScroller(
 	PlayerActions, "Grid",
 	UDim2.new(1, 0, 0.72, 0), UDim2.new(0, 0, 0.26, 0)
 )
-ActionGrid.BackgroundTransparency = 1
+Grids.Action.BackgroundTransparency = 1
 do
-	local st = ActionGrid:FindFirstChildOfClass("UIStroke")
+	local st = Grids.Action:FindFirstChildOfClass("UIStroke")
 	if st then
 		st.Transparency = 1
 	end
-	local old = ActionGrid:FindFirstChildOfClass("UIListLayout")
+	local old = Grids.Action:FindFirstChildOfClass("UIListLayout")
 	if old then
 		old:Destroy()
 	end
-	local grid = ActionGrid:FindFirstChildOfClass("UIGridLayout")
+	local grid = Grids.Action:FindFirstChildOfClass("UIGridLayout")
 	if not grid then
 		grid = Instance.new("UIGridLayout")
-		grid.Parent = ActionGrid
+		grid.Parent = Grids.Action
 	end
 	grid.CellSize = UDim2.new(0.31, 0, 0, 34)
 	grid.CellPadding = UDim2.new(0.025, 0, 0, 6)
@@ -1979,9 +2090,9 @@ StyleInput(StaffNameBox)
 --]]
 local StaffRankButtons = {
 	{"MakeMod", "Add as Mod", THEME.ButtonBackground, THEME.ModBadge,
-		UDim2.new(0.48, 0, 0.11, 0), UDim2.new(0, 0, 0.50, 0), RANK_MOD},
+		UDim2.new(0.48, 0, 0.11, 0), UDim2.new(0, 0, 0.50, 0), RANK.Mod},
 	{"MakeAdmin", "Add as Admin", THEME.ButtonBackground, THEME.AdminBadge,
-		UDim2.new(0.48, 0, 0.11, 0), UDim2.new(0.52, 0, 0.50, 0), RANK_ADMIN},
+		UDim2.new(0.48, 0, 0.11, 0), UDim2.new(0.52, 0, 0.50, 0), RANK.Admin},
 	{"RemoveStaff", "Remove from staff", THEME.DangerBackground, THEME.DangerText,
 		UDim2.new(1, 0, 0.11, 0), UDim2.new(0, 0, 0.63, 0), 0},
 }
@@ -1993,8 +2104,8 @@ do
 		BanTitle.Name = "BanTitle"
 		BanTitle.Parent = StaffSide
 	end
-	BanTitle.Size = UDim2.new(1, 0, 0.08, 0)
-	BanTitle.Position = UDim2.new(0, 0, 0.77, 0)
+	BanTitle.Size = UDim2.new(1, 0, 0.10, 0)
+	BanTitle.Position = UDim2.new(0, 0, 0.755, 0)
 	BanTitle.BackgroundTransparency = 1
 	BanTitle.Text = "Bans"
 	BanTitle.TextScaled = true
@@ -2077,7 +2188,7 @@ local function BuildStaffRow(entry, order)
 
 	-- One-tap demote, only for rows this viewer could actually change.
 	local drop = row:FindFirstChild("Drop")
-	local canDrop = (not entry.Locked) and (entry.Rank < MyRank or MyRank >= RANK_OWNER)
+	local canDrop = (not entry.Locked) and (entry.Rank < MyRank or MyRank >= RANK.Owner)
 
 	if canDrop then
 		drop = MakeSmallButton(row, "Drop", "Remove", THEME.DangerBackground, THEME.DangerText)
@@ -2206,24 +2317,24 @@ do
 	TrollNote.ZIndex = 5
 end
 
-local TrollGrid = MakeScroller(
+Grids.Troll = MakeScroller(
 	TrollSide, "Grid",
 	UDim2.new(1, 0, 0.87, 0), UDim2.new(0, 0, 0.13, 0)
 )
-TrollGrid.BackgroundTransparency = 1
+Grids.Troll.BackgroundTransparency = 1
 do
-	local st = TrollGrid:FindFirstChildOfClass("UIStroke")
+	local st = Grids.Troll:FindFirstChildOfClass("UIStroke")
 	if st then
 		st.Transparency = 1
 	end
-	local old = TrollGrid:FindFirstChildOfClass("UIListLayout")
+	local old = Grids.Troll:FindFirstChildOfClass("UIListLayout")
 	if old then
 		old:Destroy()
 	end
-	local grid = TrollGrid:FindFirstChildOfClass("UIGridLayout")
+	local grid = Grids.Troll:FindFirstChildOfClass("UIGridLayout")
 	if not grid then
 		grid = Instance.new("UIGridLayout")
-		grid.Parent = TrollGrid
+		grid.Parent = Grids.Troll
 	end
 	grid.CellSize = UDim2.new(0.31, 0, 0, 34)
 	grid.CellPadding = UDim2.new(0.025, 0, 0, 6)
@@ -2530,7 +2641,7 @@ local function BuildCommandButtons(list)
 
 		-- Troll commands live on their own page, so a mis-click on the
 		-- moderation page cannot set somebody on fire instead of warning them.
-		local host = def.Troll and TrollGrid or ActionGrid
+		local host = def.Troll and Grids.Troll or Grids.Action
 
 		local button = CommandButtons[def.Name]
 		if not button then
@@ -2738,16 +2849,16 @@ end
 ReportFrame.Visible = false
 ReportFrame.Size = UDim2.new(0.50, 0, 0.52, 0)
 ReportFrame.Position = UDim2.new(0.5, 0, 0.5, 0)
-do
-	-- Same reasoning as the admin panel: a floor so the reason list and the
-	-- booth list stay readable on a small window.
-	local minSize = ReportFrame:FindFirstChildOfClass("UISizeConstraint")
-	if not minSize then
-		minSize = Instance.new("UISizeConstraint")
-		minSize.Parent = ReportFrame
-	end
-	minSize.MinSize = Vector2.new(520, 320)
-end
+
+-- Same floor-and-ceiling as the admin panel; FitWindowsToScreen sets both.
+-- Registering the frame itself is what switches the resize handler on for it.
+SizeLimits.Report = ReportFrame
+
+-- Both windows are known about now, so apply the caps and keep following the
+-- window: it can be resized mid-session and a cap worked out once at startup
+-- would be wrong the moment somebody drags the edge.
+FitWindowsToScreen()
+ScreenGui:GetPropertyChangedSignal("AbsoluteSize"):Connect(FitWindowsToScreen)
 ReportFrame.AnchorPoint = Vector2.new(0.5, 0.5)
 ReportFrame.BackgroundColor3 = THEME.PanelBackground
 ReportFrame.BorderSizePixel = 0

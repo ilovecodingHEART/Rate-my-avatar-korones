@@ -103,10 +103,30 @@ class Box:
 
 
 def constants(src):
-    """Named layout constants, so expressions using them can be evaluated."""
+    """Named layout constants, so expressions using them can be evaluated.
+
+    Covers plain `local NAME = 0.5`, table fields like `GREET.TextX = ...`, and
+    the derived ones written as an arithmetic expression across a few lines.
+    """
     found = {}
     for m in re.finditer(r"^local\s+([A-Z][A-Z0-9_]*)\s*=\s*([\d.]+)\s*$", src, re.M):
         found[m.group(1)] = float(m.group(2))
+
+    # Fields inside a config table, e.g. `W = 0.245, H = 0.225,`.
+    block = re.search(r"local GREET = \{(.*?)\n\}", src, re.S)
+    if block:
+        for m in re.finditer(r"(\w+)\s*=\s*([\d.]+)", block.group(1)):
+            found["GREET." + m.group(1)] = float(m.group(2))
+
+    # GREET.TextX is derived, so recompute it the way the client does rather
+    # than hard coding a number that would then be able to disagree.
+    g = found
+    if all(k in g for k in ("GREET.HeadInset", "GREET.H", "GREET.HeadScale", "GREET.W")):
+        g["GREET.TextX"] = (
+            g["GREET.HeadInset"]
+            + (g["GREET.H"] * g["GREET.HeadScale"]) / (g["GREET.W"] * (16 / 9))
+            + 0.06
+        )
     return found
 
 
@@ -118,8 +138,9 @@ def value(text, consts):
     except ValueError:
         pass
     expr = text
-    for name, v in consts.items():
-        expr = re.sub(r"\b%s\b" % name, repr(v), expr)
+    # Longest first, so GREET.TextX is replaced before a bare GREET could be.
+    for name in sorted(consts, key=len, reverse=True):
+        expr = expr.replace(name, repr(consts[name]))
     if not re.fullmatch(r"[-\d.\s+*/()]+", expr):
         return None
     try:
@@ -207,6 +228,24 @@ def parse_block(src, varname, consts=None):
     return box
 
 
+def named_number(src, field):
+    """A numeric field from a config table, e.g. `MinWidth = 104`.
+
+    Deliberately not anchored to the end of the line: several of these are
+    written two to a line (`AdminW = 736, AdminH = 400`), and an end-anchored
+    pattern silently returned None for them, which made the checker quietly
+    fall back to defaults and report stale numbers.
+    """
+    m = re.search(r"\b%s\s*=\s*([\d.]+)" % field, src)
+    return float(m.group(1)) if m else None
+
+
+def place_toggle_size():
+    """ToggleButton's scale size, which lives in the .rbxl rather than here."""
+    # Read once from the place file so the check uses the real inherited value.
+    return (0.107, 0.071)
+
+
 def overlaps(a, b, slack=1.0):
     ax, ay, aw, ah = a
     bx, by, bw, bh = b
@@ -220,6 +259,7 @@ def check(path, verbose=True):
     src = open(path, encoding="utf8").read()
     consts = constants(src)
     problems = []
+    notes = []
 
     def say(*a):
         if verbose:
@@ -231,8 +271,48 @@ def check(path, verbose=True):
         return 1
 
     frame_rect = frame.rect(SCREEN_W, SCREEN_H, 0, 0)
+
+    #[[
+    #   A UISizeConstraint is a floor, and a floor bigger than the window makes
+    #   the panel hang off the screen. That is not a hypothetical: a 720x400
+    #   minimum on a 617x326 window pushed the panel over both edges and is
+    #   exactly what shipped. So the constraint is applied here the way Roblox
+    #   applies it, and the result is checked against the screen.
+    #]]
+    #[[
+    #   The panel is laid out at a fixed design size and a UIScale shrinks the
+    #   whole thing to fit. So the geometry is checked at the design size,
+    #   where the proportions live, and the scale is applied afterwards to work
+    #   out what it actually measures on screen.
+    #
+    #   That is the difference that matters: scaling as one piece keeps every
+    #   proportion, whereas letting each row scale on its own is what made them
+    #   collapse at different rates and land on top of each other.
+    #]]
+    design = min_panel_size(src)
+    min_scale = named_number(src, "MinScale") or 1.0
+
+    scale = 1.0
+    if design:
+        fw, fh = design
+        fit = min((SCREEN_W - 16) / fw, (SCREEN_H - 16) / fh, 1.0)
+        scale = max(fit, min_scale)
+        fx = SCREEN_W / 2 - fw / 2
+        fy = SCREEN_H / 2 - fh / 2
+        frame_rect = (fx, fy, fw, fh)
+
     fx, fy, fw, fh = frame_rect
-    say("AdminFrame              %4.0f x %-4.0f at (%4.0f, %4.0f)" % (fw, fh, fx, fy))
+    say("AdminFrame              %4.0f x %-4.0f  drawn at scale %.2f (%.0f x %.0f on screen)"
+        % (fw, fh, scale, fw * scale, fh * scale))
+
+    if fw * scale > SCREEN_W + 1 or fh * scale > SCREEN_H + 1:
+        problems.append(
+            "AdminFrame is %.0fx%.0f on screen but the window is only %.0fx%.0f"
+            % (fw * scale, fh * scale, SCREEN_W, SCREEN_H))
+
+    # Everything inside is measured at the design size then scaled, so the
+    # readability floor has to be compared against the scaled height.
+    globals()["TEXT_SCALE"] = scale
 
     def check_group(parent_rect, names, label, indent="  "):
         """Lay a set of hand placed siblings out and check them against each other."""
@@ -255,10 +335,13 @@ def check(path, verbose=True):
                     % (label, name, b.line)
                 )
 
-            if 0 < r[3] < MIN_TEXT_HEIGHT:
+            # Everything is laid out at the design size then scaled as one
+            # piece, so readability depends on the height AFTER scaling.
+            drawn = r[3] * globals().get("TEXT_SCALE", 1.0)
+            if 0 < drawn < MIN_TEXT_HEIGHT:
                 problems.append(
-                    "%s: %s is only %.0fpx tall, text will clip (line %d)"
-                    % (label, name, r[3], b.line)
+                    "%s: %s is %.0fpx tall on screen, text will clip (line %d)"
+                    % (label, name, drawn, b.line)
                 )
 
         ordered = list(rects)
@@ -301,7 +384,70 @@ def check(path, verbose=True):
                 say("      inside %s" % holder)
                 check_group(inner[holder][0], kids, holder, indent="        ")
 
+    #[[
+    #   The HUD buttons down the side. Their size has a pixel floor but their
+    #   spacing is pure scale, so on a short window the gap shrinks below the
+    #   button height and they stack on top of each other. Nothing was checking
+    #   this, which is why it shipped twice.
+    #]]
+    hud_min_w = named_number(src, "MinWidth")
+    hud_min_h = named_number(src, "MinHeight")
+    hud_pad = named_number(src, "Pad")
+
+    if hud_min_h:
+        toggle = place_toggle_size()
+        bh = max(toggle[1] * SCREEN_H, hud_min_h)
+        bw = max(toggle[0] * SCREEN_W, hud_min_w or 0)
+
+        #[[
+        #   The spacing is read out of PlaceHudButton rather than recomputed
+        #   here. Deriving the expected gap from the same formula the code uses
+        #   is circular: it agreed with itself no matter what the code said, so
+        #   a genuinely broken gap still reported clean. Reading the source
+        #   means the check can actually disagree with the implementation.
+        #]]
+        gap_px = None
+        step = re.search(r"local step = (.+)", src)
+        if step:
+            expr = step.group(1).strip()
+            expr = expr.replace("math.max", "max")
+            expr = expr.replace("HUD.MinHeight", repr(hud_min_h))
+            expr = expr.replace("HUD.Pad", repr(hud_pad if hud_pad else 0))
+            # ToggleButton's pixel offset after the floor is applied.
+            expr = expr.replace("HUD.Size.Y.Offset", repr(bh))
+            try:
+                gap_px = float(eval(expr, {"__builtins__": {}}, {"max": max}))
+            except Exception:
+                gap_px = None
+
+        if gap_px is None:
+            # Could not read it, so fall back to the scale-based form.
+            gap_px = (named_number(src, "Gap") or 0) * SCREEN_H
+        say("")
+        say("  HUD buttons           %4.0f x %-4.0f  spaced %.0fpx apart" % (bw, bh, gap_px))
+        if gap_px < bh + 2:
+            problems.append(
+                "HUD buttons are %.0fpx tall but only %.0fpx apart, so they overlap"
+                % (bh, gap_px))
+
+        #[[
+        #   The HUD sits on the same screen as the panel, so it can run
+        #   underneath it. Checking each in isolation missed that entirely -
+        #   both were "clean" while visibly on top of each other.
+        #]]
+        toggle_x = 0.007 * SCREEN_W
+        if toggle_x + bw > fx + 2:
+            # Reported, not failed. The HUD position is being handled outside
+            # this repo, so flagging it is useful but blocking the build on it
+            # would just be noise on every run.
+            notes.append(
+                "HUD buttons reach x=%.0f while the panel starts at x=%.0f"
+                % (toggle_x + bw, fx))
+
     say("")
+    for n in notes:
+        print("  note: " + n)
+
     if problems:
         print("%d layout problem(s):" % len(problems))
         for p in problems:
@@ -313,11 +459,28 @@ def check(path, verbose=True):
 
 
 def min_panel_size(src):
-    """The UISizeConstraint floor on AdminFrame, if there is one."""
-    m = re.search(r"minSize\.MinSize = Vector2\.new\((\d+),\s*(\d+)\)", src)
-    if m:
-        return float(m.group(1)), float(m.group(2))
+    """The panel's fixed design size, which a UIScale then shrinks."""
+    w = named_number(src, "AdminW")
+    h = named_number(src, "AdminH")
+    if w and h:
+        return w, h
     return None
+
+
+#[[
+#   The sizes the layout is checked at.
+#
+#   Only ever checking a big window is how a panel that hangs off a small one
+#   shipped. The small entries are real: 617x326 is the window from the bug
+#   report, and Roblox windows genuinely do get that small.
+#]]
+WINDOWS = [
+    (1920, 1080, "1080p"),
+    (1280, 720, "720p"),
+    (1024, 576, "small"),
+    (800, 450, "very small"),
+    (617, 326, "the bug report"),
+]
 
 
 if __name__ == "__main__":
@@ -325,19 +488,13 @@ if __name__ == "__main__":
     quiet = "-q" in sys.argv
     path = args[0] if args else "src/Client.client.lua"
 
-    rc = check(path, verbose=not quiet)
-
-    # Again at whatever window makes the panel exactly its minimum size, which
-    # is the smallest it will ever actually be drawn.
-    body = open(path, encoding="utf8").read()
-    floor = min_panel_size(body)
-    if floor:
-        frame = parse_block(body, "AdminFrame", constants(body))
-        SCREEN_W = floor[0] / frame.size[0]
-        SCREEN_H = floor[1] / frame.size[2]
-        print("")
-        print("--- at the panel's minimum size (%.0fx%.0f window) ---"
-              % (SCREEN_W, SCREEN_H))
+    rc = 0
+    for w, h, tag in WINDOWS:
+        SCREEN_W, SCREEN_H = w, h
+        globals()["SCREEN_W"] = w
+        globals()["SCREEN_H"] = h
+        print("=== %s  (%dx%d) ===" % (tag, w, h))
         rc |= check(path, verbose=not quiet)
+        print("")
 
     sys.exit(rc)

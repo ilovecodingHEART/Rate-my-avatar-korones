@@ -30,17 +30,25 @@ Three ranks. Higher can do everything lower can.
 
 | Rank | Who sets it | What it adds |
 | --- | --- | --- |
-| **Owner** | hard coded in the script | make Admins, everything below |
-| **Admin** | an Owner | bans, god mode, the shop editor, make Mods |
+| **Owner** | hard coded in the script | everything |
+| **Developer** | hard coded in the script | make Admins, everything below |
+| **Admin** | a Developer or Owner | bans, god mode, the shop editor, trolling, make Mods |
 | **Mod** | an Admin | kick, mute, freeze, warn, the report queue |
 
-**thugshaker (49603) is the hard coded Owner.** That lives in `OWNERS` at the
-top of `src/Server.server.lua` and cannot be changed from inside the game, so
-nobody can promote themselves out of a mistake or lock the real owner out.
+**thugshaker (49603) is the hard coded Owner**, in `OWNERS` at the top of
+`src/Server.server.lua`.
 
-**qzc (78857)** and **ywinfe (181869)** start as Admins. They are seeded into
-the whitelist on first boot only, so a later demotion is not undone by a
-restart.
+**qzc (78857)** and **ywinfe (181869)** are hard coded **Developers**, in
+`DEVELOPERS` just below it.
+
+Both tables live in the script rather than the whitelist, which means those
+ranks cannot be changed from inside the game by anybody — not by an Admin, not
+by each other, not by a tampered DataStore. Nobody can promote themselves out
+of a mistake, and nobody can lock the owner or the developers out.
+
+Developer sits between Admin and Owner. Because every rank check is a `>=`
+comparison, a Developer inherits every Admin power automatically; what the rank
+adds on top is being able to hand out Admin, and being untouchable by one.
 
 Permission is always by UserId, never by name. Somebody renaming themselves
 `thugshaker` gets nothing. The UserId is the number in a profile URL:
@@ -99,7 +107,7 @@ server makes a button appear on its own, with no client change.
 | --- | --- |
 | **Mod** | `kick` `mute` `unmute` `freeze` `unfreeze` `warn` `bring` `goto` `respawn` `speed` `jump` `heal` `clearbooth` `unclaim` `announce` `time` |
 | **Admin** | `ban` `unban` `god` `ungod` `invisible` `visible` `resetbooths` `lock` `unlock` `mod` `unstaff` |
-| **Owner** | `admin` |
+| **Developer** | `admin` |
 | **Trolling** (Admin) | `fling` `spin` `fire` `sparkle` `smoke` `ghost` `explode` `jail` `disco` `cleanup` |
 
 `lock` turns away anyone who is not staff. Bans and mutes survive a rejoin;
@@ -112,6 +120,16 @@ Staff are visible to everyone two ways: a coloured label above their head, and
 a `[Rank]` in front of their chat messages. Both follow the rank they already
 have, so a promotion or demotion updates them immediately rather than at the
 next rejoin, and the nametag is rebuilt on respawn.
+
+Each rank has its own colour, checked by a test to be distinct, so they are
+tellable apart across a room:
+
+| Rank | Colour |
+| --- | --- |
+| Owner | gold |
+| Developer | green |
+| Admin | purple |
+| Mod | blue |
 
 The nametag deliberately does **not** draw through walls, so a busy server does
 not turn into a wall of floating names.
@@ -181,7 +199,7 @@ a test for each of those cases.
 python3 tools/runtests.py
 ```
 
-260 tests. They run the real `Server.server.lua` and `Client.client.lua`
+270 tests. They run the real `Server.server.lua` and `Client.client.lua`
 against a mock of the Roblox API (`tools/mock_roblox.lua`, `tools/harness.lua`)
 and drive both halves the way a player would, including pressing client buttons
 and checking what the server actually did.

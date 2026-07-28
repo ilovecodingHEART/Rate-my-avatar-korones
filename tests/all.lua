@@ -126,22 +126,22 @@ test("thugshaker is a hard coded owner", function(H)
 	local access = H.lastSent(p, "AdminAccess")
 	ok(access ~= nil, "got an access message")
 	eq(access[2], true, "allowed in")
-	eq(access[3], 3, "rank 3")
+	eq(access[3], 4, "top rank")
 	eq(access[4], "Owner", "named Owner")
 end)
 
-test("the seeded IDs come in as admins", function(H)
+test("the hard coded IDs come in as developers", function(H)
 	local q = H.addPlayer("qzc", 78857)
 	local y = H.addPlayer("ywinfe", 181869)
 	H.drain()
 
 	local qa = H.lastSent(q, "AdminAccess")
-	eq(qa[3], 2, "qzc is rank 2")
-	eq(qa[4], "Admin", "qzc is Admin")
+	eq(qa[3], 3, "qzc is rank 3")
+	eq(qa[4], "Developer", "qzc is a Developer")
 
 	local ya = H.lastSent(y, "AdminAccess")
-	eq(ya[3], 2, "ywinfe is rank 2")
-	eq(ya[4], "Admin", "ywinfe is Admin")
+	eq(ya[3], 3, "ywinfe is rank 3")
+	eq(ya[4], "Developer", "ywinfe is a Developer")
 end)
 
 test("a rank is by UserId, not by name", function(H)
@@ -404,23 +404,69 @@ test("an owner can promote someone to admin", function(H)
 	eq(access[4], "Admin", "as an Admin")
 end)
 
-test("an admin can make a mod but not another admin", function(H)
-	local admin = H.addPlayer("qzc", 78857)
+test("a developer can make an admin", function(H)
+	-- qzc is a hard coded Developer, which outranks Admin, so this is allowed.
+	local dev = H.addPlayer("qzc", 78857)
 	local alice = H.addPlayer("alice", 1001)
 	H.drain()
 	H.clearSent()
 
-	H.asPlayer(admin, "AdminSetRank", {UserId = 1001, Rank = 1, Name = "alice"})
+	H.asPlayer(dev, "AdminSetRank", {UserId = 1001, Rank = 2, Name = "alice"})
 	H.drain()
+
 	local access = H.lastSent(alice, "AdminAccess")
+	eq(access[4], "Admin", "an admin was made")
+end)
+
+test("an admin can make a mod but not another admin", function(H)
+	-- Promote alice to Admin first, then have HER try to hand out Admin.
+	local dev = H.addPlayer("qzc", 78857)
+	H.drain()
+	H.asPlayer(dev, "AdminSetRank", {UserId = 1001, Rank = 2, Name = "alice"})
+
+	local admin = H.addPlayer("alice", 1001)
+	local bob = H.addPlayer("bob", 1002)
+	H.drain()
+	H.clearSent()
+
+	H.asPlayer(admin, "AdminSetRank", {UserId = 1002, Rank = 1, Name = "bob"})
+	H.drain()
+	local access = H.lastSent(bob, "AdminAccess")
 	eq(access[4], "Mod", "a mod was made")
 
-	-- Same admin trying to hand out their own rank is refused.
+	-- Now the same admin trying to hand out their own rank is refused.
 	H.clearSent()
-	H.asPlayer(admin, "AdminSetRank", {UserId = 1002, Rank = 2, Name = "bob"})
+	H.asPlayer(admin, "AdminSetRank", {UserId = 1003, Rank = 2, Name = "carol"})
 	local err = H.lastSent(admin, "AdminError")
 	ok(err ~= nil, "refused")
 	ok(string.find(tostring(err[2]), "above your own") ~= nil, "told why")
+end)
+
+test("developer cannot be handed out in game", function(H)
+	local owner = H.addPlayer("thugshaker", 49603)
+	H.drain()
+	H.clearSent()
+
+	H.asPlayer(owner, "AdminSetRank", {UserId = 1001, Rank = 3, Name = "alice"})
+	local err = H.lastSent(owner, "AdminError")
+	ok(err ~= nil, "refused even for an owner")
+	ok(string.find(tostring(err[2]), "script") ~= nil, "says it is set in the script")
+end)
+
+test("a hard coded developer cannot be demoted", function(H)
+	local owner = H.addPlayer("thugshaker", 49603)
+	H.drain()
+	H.clearSent()
+
+	H.asPlayer(owner, "AdminSetRank", {UserId = 78857, Rank = 0, Name = "qzc"})
+
+	local err = H.lastSent(owner, "AdminError")
+	ok(err ~= nil, "refused")
+
+	-- And they still have the rank.
+	local q = H.addPlayer("qzc", 78857)
+	H.drain()
+	eq(H.lastSent(q, "AdminAccess")[4], "Developer", "still a Developer")
 end)
 
 test("owner cannot be handed out in game", function(H)

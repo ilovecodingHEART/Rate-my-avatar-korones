@@ -33,7 +33,11 @@ def theme(src):
     return out
 
 
-def draw(path, page, out_path):
+def draw(path, page, out_path, screen=None):
+    if screen:
+        import checklayout
+        checklayout.SCREEN_W, checklayout.SCREEN_H = screen
+        globals()["SCREEN_W"], globals()["SCREEN_H"] = screen
     src = open(path, encoding="utf8").read()
     consts = constants(src)
     T = theme(src)
@@ -54,8 +58,22 @@ def draw(path, page, out_path):
         if label:
             d.text((x + 6, y + 4), label, fill=colour or text)
 
+    from checklayout import min_panel_size, named_number
+    design = min_panel_size(src)
+    minscale = named_number(src, "MinScale") or 1.0
+
     frame = parse_block(src, "AdminFrame", consts)
-    frect = frame.rect(SCREEN_W, SCREEN_H, 0, 0)
+    if design:
+        # Laid out at the design size, then scaled to fit, same as the client.
+        dw, dh = design
+        fit = min((SCREEN_W - 16) / dw, (SCREEN_H - 16) / dh, 1.0)
+        sc = max(fit, minscale)
+        fw, fh = dw * sc, dh * sc
+        fx, fy = SCREEN_W / 2 - fw / 2, SCREEN_H / 2 - fh / 2
+        frect = (fx, fy, fw, fh)
+    else:
+        frect = frame.rect(SCREEN_W, SCREEN_H, 0, 0)
+        fx, fy, fw, fh = frect
     fx, fy, fw, fh = frect
     box(frect, bg, None, width=4)
 
@@ -182,4 +200,9 @@ def draw(path, page, out_path):
 
 if __name__ == "__main__":
     page = sys.argv[1] if len(sys.argv) > 1 else "Home"
-    draw("src/Client.client.lua", page, "/tmp/panel_%s.png" % page.lower())
+    if len(sys.argv) > 3:
+        size = (int(sys.argv[2]), int(sys.argv[3]))
+        draw("src/Client.client.lua", page,
+             "/tmp/panel_%s_%dx%d.png" % (page.lower(), size[0], size[1]), size)
+    else:
+        draw("src/Client.client.lua", page, "/tmp/panel_%s.png" % page.lower())

@@ -13,6 +13,11 @@ DECL = re.compile(r"^local (?:function )?([A-Za-z_][A-Za-z0-9_]*)")
 # `local a, b = ...`
 DECL_MULTI = re.compile(r"^local ([A-Za-z_][A-Za-z0-9_, ]*?)\s*=")
 CALL = re.compile(r"\b([A-Za-z_][A-Za-z0-9_]*)\s*[({\"']")
+# `Thing.Field = x` and `Thing:Method()` also read the local, and inside a
+# closure they are not called until later - so the parser sees no error but the
+# name is still nil at run time if it is declared further down. A UIScale fix
+# shipped with exactly this shape and only the test suite caught it.
+TOUCH = re.compile(r"(?<![.:\w])([A-Za-z_][A-Za-z0-9_]*)\s*[.:][A-Za-z_]")
 
 
 def blank_noise(line):
@@ -22,8 +27,33 @@ def blank_noise(line):
     return line.split("--")[0]
 
 
+def strip_block_comments(text):
+    """Blank out --[[ ]] blocks, keeping line numbers intact.
+
+    The file headers are block comments full of example code, and reading them
+    as real statements produced a page of false positives.
+    """
+    out = []
+    depth = 0
+    for line in text.split("\n"):
+        stripped = line.strip()
+        if depth == 0 and stripped.startswith("--[["):
+            depth = 1
+            out.append("")
+            if "]]" in stripped[4:]:
+                depth = 0
+            continue
+        if depth:
+            out.append("")
+            if "]]" in line:
+                depth = 0
+            continue
+        out.append(line)
+    return out
+
+
 def main(path):
-    lines = open(path, encoding="utf8").read().split("\n")
+    lines = strip_block_comments(open(path, encoding="utf8").read())
 
     declared = {}
     for i, line in enumerate(lines):
@@ -43,7 +73,7 @@ def main(path):
     problems = []
     for i, line in enumerate(lines):
         code = blank_noise(line)
-        for name in CALL.findall(code):
+        for name in list(CALL.findall(code)) + list(TOUCH.findall(code)):
             at = declared.get(name)
             if at is not None and at > i:
                 problems.append((i + 1, name, at + 1))

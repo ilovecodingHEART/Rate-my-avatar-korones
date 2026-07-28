@@ -165,25 +165,48 @@ local SHOP_CATEGORIES = {"Passes", "Items"}
 local RANK_NONE = 0
 local RANK_MOD = 1
 local RANK_ADMIN = 2
-local RANK_OWNER = 3
+local RANK_DEV = 3
+local RANK_OWNER = 4
 
 local RANK_NAME = {}
 RANK_NAME[RANK_NONE] = "Player"
 RANK_NAME[RANK_MOD] = "Mod"
 RANK_NAME[RANK_ADMIN] = "Admin"
+RANK_NAME[RANK_DEV] = "Developer"
 RANK_NAME[RANK_OWNER] = "Owner"
+
+--[[
+	Developer sits above Admin and below Owner.
+
+	Everything is compared with >= rather than against a specific number, so
+	adding a rank in the middle needs no other change: a Developer inherits
+	every Admin power automatically, and the "cannot promote to your own rank
+	or above" rule keeps working without being told about the new one.
+
+	The only thing Developer does NOT get is handing out Admin and above, which
+	stays Owner-only, and being demoted by an Admin.
+--]]
 
 -- Hard coded, never editable in game.
 local OWNERS = {
 	[49603] = "thugshaker",
 }
 
+--[[
+	Also hard coded. These are the people who built the place, so their rank
+	comes from the script rather than the whitelist for the same reason the
+	Owner's does: it cannot be revoked from inside the game, by anyone,
+	including by each other.
+--]]
+local DEVELOPERS = {
+	[78857] = "qzc",
+	[181869] = "ywinfe",
+}
+
 -- Seeded into the whitelist the first time the place boots. After that the
 -- saved list wins, so a demotion made in the panel is not undone by a restart.
-local DEFAULT_STAFF = {
-	[78857] = {Rank = RANK_ADMIN, Name = "qzc"},
-	[181869] = {Rank = RANK_ADMIN, Name = "ywinfe"},
-}
+-- Owners and Developers are not listed here; they come from the tables above.
+local DEFAULT_STAFF = {}
 
 -- Also let whoever owns the place in, so you are never locked out.
 local ALLOW_PLACE_OWNER = true
@@ -846,11 +869,12 @@ local function LoadStaff()
 				local userId = tonumber(key)
 				if userId and type(row) == "table" then
 					local rank = tonumber(row.Rank) or RANK_NONE
-					-- Owner is hard coded only, never restored from a save.
-					if rank >= RANK_OWNER then
+					-- Developer and Owner are hard coded only, never restored
+					-- from a save, so a tampered DataStore cannot mint one.
+					if rank >= RANK_DEV then
 						rank = RANK_ADMIN
 					end
-					if rank > RANK_NONE and not OWNERS[userId] then
+					if rank > RANK_NONE and not OWNERS[userId] and not DEVELOPERS[userId] then
 						Staff[userId] = {
 							Rank = rank,
 							Name = tostring(row.Name or userId),
@@ -867,7 +891,7 @@ local function LoadStaff()
 	-- First boot only: seed the people who were hard coded before.
 	if not loaded then
 		for userId, row in pairs(DEFAULT_STAFF) do
-			if not OWNERS[userId] then
+			if not OWNERS[userId] and not DEVELOPERS[userId] then
 				Staff[userId] = {Rank = row.Rank, Name = row.Name, By = "default"}
 			end
 		end
@@ -938,6 +962,9 @@ local function RankOfUserId(userId)
 	end
 	if OWNERS[userId] then
 		return RANK_OWNER
+	end
+	if DEVELOPERS[userId] then
+		return RANK_DEV
 	end
 	local row = Staff[userId]
 	if row then
@@ -1352,12 +1379,25 @@ local function PushStaff(Player)
 
 	local list = {}
 
+	-- Both come from the script rather than the whitelist, so they are shown
+	-- with a note saying so and no remove button.
 	for userId, name in pairs(OWNERS) do
 		list[#list + 1] = {
 			UserId = userId,
 			Name = name,
 			Rank = RANK_OWNER,
 			RankName = "Owner",
+			By = "hard coded",
+			Locked = true,
+		}
+	end
+
+	for userId, name in pairs(DEVELOPERS) do
+		list[#list + 1] = {
+			UserId = userId,
+			Name = name,
+			Rank = RANK_DEV,
+			RankName = "Developer",
 			By = "hard coded",
 			Locked = true,
 		}
@@ -2441,6 +2481,9 @@ local function SetStaffRank(actor, targetUserId, rank, displayName)
 	if OWNERS[targetUserId] then
 		return nil, "Owners are set in the script and cannot be changed here."
 	end
+	if DEVELOPERS[targetUserId] then
+		return nil, "Developers are set in the script and cannot be changed here."
+	end
 	if targetUserId == actor.UserId then
 		return nil, "You cannot change your own rank."
 	end
@@ -2452,8 +2495,8 @@ local function SetStaffRank(actor, targetUserId, rank, displayName)
 	if rank >= myRank and myRank < RANK_OWNER then
 		return nil, "You cannot hand out a rank at or above your own."
 	end
-	if rank >= RANK_OWNER then
-		return nil, "Owner cannot be given out in game."
+	if rank >= RANK_DEV then
+		return nil, "Developer and Owner are set in the script, not in game."
 	end
 
 	local known = FindPlayerByUserId(targetUserId)
@@ -2508,10 +2551,10 @@ AddCommand("mod", {
 })
 
 AddCommand("admin", {
-	Rank = RANK_OWNER,
+	Rank = RANK_DEV,
 	Args = {"player"},
 	Label = "Make Admin",
-	Blurb = "Give them the Admin rank. Owner only.",
+	Blurb = "Give them the Admin rank. Developer and up.",
 	Run = function(actor, target)
 		return SetStaffRank(actor, target.UserId, RANK_ADMIN, target.Name)
 	end,
@@ -3517,6 +3560,9 @@ end)
 local RANK_COLOUR = {}
 RANK_COLOUR[RANK_MOD] = Color3.fromRGB(130, 200, 255)
 RANK_COLOUR[RANK_ADMIN] = Color3.fromRGB(214, 170, 255)
+-- Green, so Developer is not mistaken for Admin purple or Owner gold at a
+-- glance. The four ranks have to be tellable apart across a room.
+RANK_COLOUR[RANK_DEV] = Color3.fromRGB(120, 235, 160)
 RANK_COLOUR[RANK_OWNER] = Color3.fromRGB(255, 196, 92)
 
 local TAG_NAME = "StaffTag"

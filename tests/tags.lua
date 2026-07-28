@@ -37,12 +37,39 @@ test("staff get a label above their head", function(H)
 end)
 
 test("each rank gets its own label", function(H)
-	local admin = H.addPlayer("qzc", 78857)
+	local dev = H.addPlayer("qzc", 78857)
 	H.drain()
 
-	local label = tagOf(admin)
-	ok(label ~= nil, "the admin has a tag")
-	eq(label.Text, "Admin", "reading Admin")
+	local label = tagOf(dev)
+	ok(label ~= nil, "the developer has a tag")
+	eq(label.Text, "Developer", "reading Developer")
+
+	-- A promoted Admin gets their own wording, not the Developer one.
+	H.asPlayer(dev, "AdminSetRank", {UserId = 1001, Rank = 2, Name = "alice"})
+	local alice = H.addPlayer("alice", 1001)
+	H.drain()
+	eq(tagOf(alice).Text, "Admin", "and an admin reads Admin")
+end)
+
+test("the four ranks all have different tag colours", function(H)
+	-- A tag nobody can tell apart is not much of a tag.
+	local owner = H.addPlayer("thugshaker", 49603)
+	local dev = H.addPlayer("qzc", 78857)
+	H.drain()
+
+	H.asPlayer(owner, "AdminSetRank", {UserId = 1001, Rank = 2, Name = "alice"})
+	H.asPlayer(owner, "AdminSetRank", {UserId = 1002, Rank = 1, Name = "bob"})
+	local admin = H.addPlayer("alice", 1001)
+	local mod = H.addPlayer("bob", 1002)
+	H.drain()
+
+	local seen = {}
+	for _, p in ipairs({owner, dev, admin, mod}) do
+		local c = tagOf(p).TextColor3
+		local key = tostring(c.R) .. "," .. tostring(c.G) .. "," .. tostring(c.B)
+		ok(seen[key] == nil, "colour for " .. tagOf(p).Text .. " is not a duplicate")
+		seen[key] = true
+	end
 end)
 
 test("ordinary players get no label", function(H)
