@@ -480,6 +480,73 @@ test("the HUD buttons never overlap each other", function(H)
 	end
 end)
 
+-------------------------------------------------------------------------------
+-- Text inputs
+-------------------------------------------------------------------------------
+
+test("no input inherits TextScaled from the place file", function(H)
+	--[[
+		Frame.TextBox in the .rbxl has TextScaled = true, and every input in
+		the UI is a clone of it. TextScaled grows the font until it fills the
+		box, so a 42px field rendered ~38px glyphs where a UI font wants 14-18.
+		All seven clones inherited it and nothing turned it off.
+
+		This walks every TextBox that actually exists rather than a hard coded
+		list, so a new input added later is covered without anyone remembering
+		to add it here.
+	--]]
+	local admin = H.addPlayer("qzc", 78857)
+	H.drain()
+	H.runClient(admin)
+
+	local function walk(node, found)
+		for _, c in ipairs(node:GetChildren()) do
+			if c.ClassName == "TextBox" then
+				found[#found + 1] = c
+			end
+			walk(c, found)
+		end
+		return found
+	end
+
+	local boxes = walk(H.clientGui, {})
+	ok(#boxes >= 6, "found the inputs (" .. #boxes .. ")")
+
+	for _, box in ipairs(boxes) do
+		eq(box.TextScaled, false, box.Name .. " does not scale its text")
+		ok(box.TextSize and box.TextSize >= 12 and box.TextSize <= 20,
+			box.Name .. " has a readable TextSize (" .. tostring(box.TextSize) .. ")")
+		ok(box:FindFirstChildOfClass("UIPadding") ~= nil,
+			box.Name .. " has padding so the text is not flush to the border")
+	end
+end)
+
+test("single line inputs do not wrap, the report note does", function(H)
+	--[[
+		Wrapping a placeholder mid-word inside a 42px tall field looks broken.
+		The report note is the one genuine exception: it is a free-text note,
+		so it wraps and sits top aligned.
+	--]]
+	local alice = H.addPlayer("alice", 1001)
+	H.drain()
+	H.runClient(alice)
+
+	local gui = H.clientGui
+
+	local note = H.findIn(gui, "ReportFrame"):FindFirstChild("Note")
+	ok(note ~= nil, "the report note exists")
+	eq(note.TextWrapped, true, "it wraps")
+	eq(note.MultiLine, true, "and takes more than one line")
+
+	-- The single line fields must not.
+	for _, name in ipairs({"TextBox", "ImageBox"}) do
+		local b = H.findIn(gui, name)
+		if b then
+			eq(b.TextWrapped, false, name .. " stays on one line")
+		end
+	end
+end)
+
 test("every HUD button is built the same way", function(H)
 	--[[
 		ShopButton was a clone of ToggleButton, so it drew its caption through

@@ -179,6 +179,27 @@ local function StyleButton(Button, Background, StrokeColor, TextColor)
 	StyleCaption(Button, TextColor)
 end
 
+--[[
+	Every input in the place is a clone of Frame.TextBox, and that box is set
+	to TextScaled = true in the .rbxl. TextScaled grows the font until it fills
+	the box, so a 42px tall field rendered ~38px glyphs where a UI font wants
+	14-18. That is what made the boxes look shouty and cramped, and it was
+	inherited by all seven clones because nothing here ever turned it off.
+
+	So the text properties are pinned explicitly rather than left to whatever
+	the source happened to carry:
+
+	    TextScaled  off, or the size below is ignored
+	    TextSize    a real, readable size
+	    TextWrapped off, because these are one-line fields and wrapping a
+	                placeholder mid-word inside a 42px box looks broken
+	    TextXAlignment  left, so the caret starts where the eye does
+	    UIPadding   a few pixels so the text is not flush against the border
+
+	Anything that genuinely wants different values sets them after calling this.
+--]]
+local INPUT_TEXT_SIZE = 15
+
 local function StyleInput(Box)
 	Box.BackgroundColor3 = THEME.InputBackground
 	Box.BackgroundTransparency = 0
@@ -186,6 +207,24 @@ local function StyleInput(Box)
 	Box.TextColor3 = THEME.Text
 	Box.TextStrokeTransparency = 1
 	Box.PlaceholderColor3 = THEME.Placeholder
+
+	Box.TextScaled = false
+	Box.TextSize = INPUT_TEXT_SIZE
+	Box.TextWrapped = false
+	Box.TextTruncate = Enum.TextTruncate.AtEnd
+	Box.TextXAlignment = Enum.TextXAlignment.Left
+	Box.TextYAlignment = Enum.TextYAlignment.Center
+	Box.Font = BODY_FONT
+	Box.ClipsDescendants = true
+
+	local pad = Box:FindFirstChildOfClass("UIPadding")
+	if not pad then
+		pad = Instance.new("UIPadding")
+		pad.Parent = Box
+	end
+	pad.PaddingLeft = UDim.new(0, 10)
+	pad.PaddingRight = UDim.new(0, 10)
+
 	GetOrMakeCorner(Box, CONTROL_CORNER)
 	StyleBorder(Box, THEME.InputStroke, 2)
 end
@@ -2592,7 +2631,10 @@ local function MakeField(name, label, order, placeholder)
 	cap.Size = UDim2.new(0.26, 0, 1, 0)
 	cap.BackgroundTransparency = 1
 	cap.Text = label
-	cap.TextScaled = true
+	-- Fixed size for the same reason as the box beside it: TextScaled on a
+	-- short row makes the caption taller than the field it labels.
+	cap.TextScaled = false
+	cap.TextSize = INPUT_TEXT_SIZE
 	cap.Font = BODY_FONT
 	cap.TextColor3 = THEME.MutedText
 	cap.TextXAlignment = Enum.TextXAlignment.Left
@@ -2606,17 +2648,15 @@ local function MakeField(name, label, order, placeholder)
 	end
 	box.Size = UDim2.new(0.72, 0, 0.82, 0)
 	box.Position = UDim2.new(0.28, 0, 0.09, 0)
-	box.BackgroundColor3 = THEME.InputBackground
-	box.BorderSizePixel = 0
 	box.Text = ""
 	box.PlaceholderText = placeholder or ""
-	box.PlaceholderColor3 = THEME.Placeholder
-	box.TextColor3 = THEME.Text
-	box.TextScaled = true
 	box.ClearTextOnFocus = false
 	box.ZIndex = 5
-	GetOrMakeCorner(box, CONTROL_CORNER)
-	StyleBorder(box, THEME.InputStroke, 2)
+
+	-- Through StyleInput rather than styled by hand, so these fields match
+	-- every other input. Doing it by hand here is how they ended up as the
+	-- only boxes still carrying TextScaled.
+	StyleInput(box)
 
 	AdminFields[name] = box
 	return box
@@ -3097,6 +3137,13 @@ ReportNote.ClearTextOnFocus = false
 ReportNote.Visible = true
 ReportNote.ZIndex = 3
 StyleInput(ReportNote)
+
+-- The one input that is a free-text note rather than a single-line field, so
+-- it wraps and sits top-aligned instead of truncating.
+ReportNote.TextWrapped = true
+ReportNote.TextTruncate = Enum.TextTruncate.None
+ReportNote.TextYAlignment = Enum.TextYAlignment.Top
+ReportNote.MultiLine = true
 
 local SendReport = MakeSmallButton(ReportFrame, "Send", "Send Report",
 	THEME.ReportBackground, THEME.ReportText)
