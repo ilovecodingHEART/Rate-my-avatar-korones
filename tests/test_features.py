@@ -201,12 +201,12 @@ L,M,bs = boot(owned=(BOOMBOX,))
 tool = M.new("Tool","Boombox",M.ServerStorage)
 p = mkplayer(M); M.Players.PlayerAdded.Fire(p)
 bp = p.Backpack
-check("boombox granted to owner", bp.FindFirstChild(bp,"Boombox") is not None)
+check("boombox granted to owner", bp.FindFirstChild(bp, "Boombox") is not None)
 L,M,bs = boot(owned=())
 tool = M.new("Tool","Boombox",M.ServerStorage)
 p = mkplayer(M); M.Players.PlayerAdded.Fire(p)
 bp = p.Backpack
-check("boombox NOT granted to non-owner", bp.FindFirstChild(bp,"Boombox") is None)
+check("boombox NOT granted to non-owner", bp.FindFirstChild(bp, "Boombox") is None)
 
 print("\n=== booth ownership still enforced ===")
 L,M,bs = boot(owned=(UPLOAD,PERMANENT), n_booths=2)
@@ -219,6 +219,85 @@ check("one booth per player", c.Display.BoothOwner.Value is None)
 M.clock+=100
 M.remote.OnServerEvent.Fire(p2,"ChangeImage","12")
 check("non-owner cannot edit", a.Display.SurfaceGui.ImageLabel.Image!="rbxassetid://12")
+
+print("\n=== self healing: loose booths (the rateava3 bug) ===")
+# Build booths NOT in the folder, named "boothgood", like the real place file.
+from lupa import LuaRuntime as _LR
+L=_LR(unpack_returned_tuples=True); g=L.globals()
+M=L.execute(open(MOCK).read()); M.install(g,None)
+L.execute("""
+local M = ...
+local MPS = M.MPS
+MPS.PlayerOwnsAsset = function(a1,a2,a3)
+  local plr,id
+  if a1==MPS then plr,id=a2,a3 else plr,id=a1,a2 end
+  if M.mps.err then error("api down") end
+  return M.owned[id] == true
+end
+""", M)
+M.owned = L.eval("{}")
+new=M.new
+WS=M.booths.Parent
+prompts=[]
+for i in range(18):
+    b=new("Model","boothgood",WS)          # loose in Workspace, wrong name
+    d=new("Part","Display",b)
+    d.Position=L.eval("({X=%d,Y=0,Z=0})"%(i*10))
+    sg=new("SurfaceGui","SurfaceGui",d)
+    new("ImageLabel","ImageLabel",sg); new("TextLabel","TextLabel",sg)
+    at=new("Attachment","Attachment",d)
+    pr=new("ProximityPrompt","ProximityPrompt",at); pr.Triggered=M.newSignal()
+    new("ObjectValue","BoothOwner",d)
+    pn=new("Part","PartNamePlayer",b)
+    s2=new("SurfaceGui","SurfaceGui",pn); new("TextLabel","TextLabel",s2)
+    prompts.append(pr)
+# a decoy that must NOT be adopted
+decoy=new("Model","NotABooth",WS); new("Part","Display",decoy)
+before=len(list(M.booths.GetChildren(M.booths).values()))
+L.execute(open(SERVER).read())
+after=list(M.booths.GetChildren(M.booths).values())
+check("starts with 0 in the folder", before==0, str(before))
+check("server adopts all 18 loose booths", len(after)==18, str(len(after)))
+check("all renamed to 'Booth'", all(b.Name=="Booth" for b in after),
+      str(sorted(set(b.Name for b in after))))
+check("decoy model NOT adopted", decoy.Parent!=M.booths and decoy.Name=="NotABooth")
+p=mkplayer(M); M.Players.PlayerAdded.Fire(p)
+prompts[0].Triggered.Fire(p)
+owned=p.FindFirstChild(p, "OwnedBooth")
+check("adopted booth is CLAIMABLE", owned is not None and owned.Value is not None)
+
+print("\n=== self healing: missing Booths folder ===")
+L2=_LR(unpack_returned_tuples=True); g2=L2.globals()
+M2=L2.execute(open(MOCK).read()); M2.install(g2,None)
+L2.execute("""
+local M = ...
+local MPS = M.MPS
+MPS.PlayerOwnsAsset = function(a1,a2,a3) return false end
+""", M2)
+M2.owned = L2.eval("{}")
+# delete the pre-made folder so the server must create it
+M2.booths.Parent = None
+WS2 = M2.Workspace if hasattr(M2,'Workspace') else None
+ok_run=True
+try:
+    L2.execute(open(SERVER).read())
+except Exception as e:
+    ok_run=False
+    print("   error:", str(e)[:120])
+check("server survives a missing Booths folder (no infinite WaitForChild)", ok_run)
+
+print("\n=== boombox built at run time ===")
+L3,M3,bs3 = boot(owned=(BOOMBOX,))
+tool = M3.ServerStorage.FindFirstChild(M3.ServerStorage, "Boombox")
+check("tool auto-created in ServerStorage", tool is not None)
+if tool is not None:
+    h=tool.FindFirstChild(tool, "Handle")
+    check("has Handle", h is not None)
+    check("has Sound on Handle", h is not None and h.FindFirstChild(h, "BoomboxSound") is not None)
+    check("tool has NO child scripts (Source cannot be set at run time)",
+          tool.FindFirstChild(tool, "BoomboxServer") is None and tool.FindFirstChild(tool, "BoomboxClient") is None)
+check("shared BoomboxRemote created in ReplicatedStorage",
+      M3.RS.FindFirstChild(M3.RS, "BoomboxRemote") is not None)
 
 print()
 bad=[x for x in ok if not x]

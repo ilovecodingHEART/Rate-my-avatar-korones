@@ -1,133 +1,75 @@
 # Rate-my-avatar-korones
 
-Booth system with player-set booth images and a dark-themed GUI.
+Booth system for Pekora: claimable booths, three gamepasses, a shop, a working
+boombox and a loading screen.
 
 Original booth system by **ywinfe** and **thugshaker**.
 
-![Dark theme preview](docs/dark-theme-preview.png)
+## Install — three scripts, no Command Bar
 
-Image uploads locked behind an item:
-
-![Paywall locked](docs/paywall-locked-preview.png)
-
-## Files
-
-| Path | Goes in |
-|---|---|
-| `src/ServerScriptService/BoothServer.server.lua` | `ServerScriptService` (a `Script`) |
-| `src/StarterGui/MainUI/Client.client.lua` | `StarterGui.MainUI.Client` (a `LocalScript`) |
-| `Custom Booth (Modified).rbxm` | Both scripts already patched in — drag into Studio |
-| `Custom Booth.rbxm` | The untouched original model |
-
-## Setup
-
-1. Insert `Custom Booth (Modified).rbxm` into Studio, then move its folders to the
-   matching services (`ReplicatedStorage.RemoteEvent`, `StarterGui.MainUI`,
-   `ServerScriptService.Server`, `Workspace.Booths`). Delete the `DELETE ME` part.
-2. Play. Walk up to a booth and hold the prompt to claim it.
-
-No HttpService, no external API — nothing extra to enable.
-
-## The GUI
-
-The image controls and the dark theme are applied **at run time** by the client
-script, so nothing has to be recoloured or added by hand in Studio. New widgets
-are cloned from the existing ones, so corners, strokes and fonts stay consistent.
-
-| Row | Type | Purpose |
+| # | Where | What |
 |---|---|---|
-| `TextLabel` | TextLabel | "Booth Menu" title |
-| `TextBox` | TextBox | booth text entry |
-| `ChangeText` | TextButton | "Send" |
-| `ImageBox` | TextBox | "Enter Image / Decal ID.." *(added)* |
-| `ChangeImage` | TextButton | "Set Image", or "Unlock Image Uploads" while locked *(added)* |
-| `Status` | TextLabel | green/red feedback line *(added)* |
-| `UnclaimBooth` | TextButton | red-tinted "Unclaim Booth" |
+| 1 | `ServerScriptService.Server` | paste `src/ServerScriptService/BoothServer.server.lua` |
+| 2 | `StarterGui.MainUI.Client` | paste `src/StarterGui/MainUI/Client.client.lua` |
+| 3 | `ReplicatedFirst` → new **LocalScript** | paste `src/ReplicatedFirst/LoadingScreen.client.lua` |
 
-Enter submits in both text boxes. Row heights, list padding and `UIPadding`
-total **0.971** of the frame, so nothing is cut off by `ClipsDescendants`.
+Nothing else. The server builds the rest on its own at run time.
 
-### Palette
+## Self healing
 
-| Role | RGB |
-|---|---|
-| Panel background | `12, 12, 14` |
-| Panel outline | `64, 69, 78` |
-| Input background | `24, 25, 29` |
-| Button background | `30, 32, 37` |
-| Unclaim (danger) | `34, 22, 24` bg / `255, 138, 138` text |
-| Text / muted | `236, 238, 242` / `150, 156, 166` |
+Booths only work inside `Workspace.Booths`, because that is the only place the
+server looks. Duplicating in Studio leaves them loose in Workspace, usually
+still called `boothgood` — which is exactly what broke `rateava3.rbxl`.
 
-Edit the `THEME` table at the top of the client script to recolour everything.
+So the server now repairs it itself on every boot:
 
-## Paywall (locking image uploads)
+- creates `Workspace.Booths` if it is missing (never `WaitForChild`, which
+  would hang forever and break everything)
+- sweeps Workspace, adopts anything shaped like a booth, renames it `Booth`
+- ignores models that only *look* similar
+- builds `ServerStorage.Boombox` if absent
 
-Setting a custom booth image is locked behind an item. Config lives at the top
-of the **server** script:
+## Gamepasses
 
-```lua
-local PAYWALL_ENABLED    = true
-local PAYWALL_ID         = 356360
-local PAYWALL_IS_GAMEPASS = false
-local PAYWALL_NAME       = "Thugshaker fan shirt"
+Sold as Pekora catalog shirts, since real game passes do not work there. All
+use `PlayerOwnsAsset` / `PromptPurchase`. Players only ever see the word
+"Gamepass", never a shirt name.
+
+| Item | Asset ID | Unlocks |
+|---|---|---|
+| Image uploads | `356360` | Set the image on the booth you claimed |
+| Boombox | `353454` | Boombox tool that plays any audio ID |
+| Permanent image | `353447` | Your image stays on the booth after you leave |
+
+## Permanent images
+
+Buying `353447` makes your image belong to the **booth**, not to you:
+
+- saved per booth by index in a DataStore
+- survives unclaim, disconnect and server restart
+- the next claimer inherits it, and cannot replace it without `356360`
+- `ResetBooth` deliberately does **not** wipe it
+
+Without the pass an image is temporary: shown now, gone on unclaim, and it
+never overwrites a paid one.
+
+Unclaimed booths and booths with no saved image show `rbxassetid://821176`.
+
+## Boombox
+
+The tool is generated at run time with just a Handle, Sound and no scripts —
+`Script.Source` cannot be written at run time, so a generated tool can never
+carry code. The logic lives in the two scripts you already paste: the server
+drives the sound, the client draws the panel when the tool is equipped.
+
+## Tests
+
+```bash
+python -m venv .venv && .venv/bin/pip install lupa
+.venv/bin/python tests/test_features.py    # 39 checks
+.venv/bin/python tests/test_rateava3.py    # 8 checks, against the real place file
 ```
 
-### Asset vs game pass — these are not interchangeable
-
-Your link is `pekora.zip/**catalog**/356360/Thugshaker-fan-shirt`. A `/catalog/`
-page is an **asset** (shirt/t-shirt/gear), *not* a game pass, so it needs the
-asset API. Using the game-pass API on an asset ID silently returns false and
-nobody can ever unlock it.
-
-| | `PAYWALL_IS_GAMEPASS = false` (your link) | `= true` |
-|---|---|---|
-| URL | `/catalog/<id>/` | `/game-pass/<id>/` |
-| Check | `PlayerOwnsAsset(Player, id)` | `UserOwnsGamePassAsync(Player.UserId, id)` |
-| Prompt | `PromptPurchase` | `PromptGamePassPurchase` |
-| Event | `PromptPurchaseFinished` | `PromptGamePassPurchaseFinished` |
-
-Note the check takes the **Player object** for assets but the **UserId** for
-passes — a classic silent-failure bug. Both paths are covered by the tests.
-
-If you make a real game pass later, put its ID in `PAYWALL_ID` and flip
-`PAYWALL_IS_GAMEPASS` to `true`. Nothing else changes.
-
-### Behaviour
-
-- Locked: the button reads **"Unlock Image Uploads"** in amber, the ID box is
-  read-only, and clicking opens the purchase prompt.
-- On purchase, `PromptPurchaseFinished` clears the cache, re-checks against the
-  API, and the button flips to "Set Image" without rejoining.
-- **The check is enforced on the server**, inside `HandleChangeImage`. Hiding
-  the button is only cosmetic — an exploiter firing the remote directly is still
-  refused.
-- Ownership is cached for 30 s so button-spam cannot spam the web API; a
-  purchase clears it instantly.
-- If the ownership API errors, access is **denied** (fails closed) rather than
-  handing out the perk for free.
-- Set `PAYWALL_ENABLED = false` to make images free for everyone again.
-
-### Testing it
-
-Ownership is real, so in Studio you won't own the item unless the logged-in
-account does. Quickest checks:
-
-1. Set `PAYWALL_ENABLED = false` → button returns to "Set Image".
-2. Temporarily `return true` in `DoOwnershipCheck` to preview the unlocked UI.
-3. On Pekora, join with an account that owns the shirt and one that doesn't.
-
-## Server behaviour
-
-- `ChangeImage` accepts a bare numeric ID, `rbxassetid://123`, or a link with
-  `?id=123` — always rebuilt as `rbxassetid://<digits>`, so a player can never
-  inject an arbitrary URL.
-- Ownership is validated on every remote call, one booth per player, with a
-  1-second per-player cooldown.
-- Booth text is run through `FilterStringAsync`; set `FILTER_TEXT = false` if
-  that API is unavailable on your platform.
-- A booth unclaimed while a filter call was still yielding is never overwritten
-  by the late result, and a booth whose owner left is always released.
-- Booths added to the folder at run time are wired up automatically.
-
-Compatible with Roblox/Luau from 2021 and earlier — no `task.*`, attributes, or
-string interpolation.
+Covers passes, permanence, inheritance, per-item cache isolation, fail-closed
+ownership, DataStore outages, boombox grants, and self-healing the exact
+`rateava3.rbxl` layout.

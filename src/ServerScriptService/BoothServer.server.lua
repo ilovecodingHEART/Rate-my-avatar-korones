@@ -33,7 +33,15 @@ local DataStoreService = game:GetService("DataStoreService")
 local ServerStorage = game:GetService("ServerStorage")
 
 local RemoteEvent = ReplicatedStorage:WaitForChild("RemoteEvent")
-local Booths = Workspace:WaitForChild("Booths")
+
+-- Find-or-create. Never WaitForChild here: if the folder is missing the whole
+-- script would hang forever and nothing would be claimable.
+local Booths = Workspace:FindFirstChild("Booths")
+if not Booths then
+	Booths = Instance.new("Folder")
+	Booths.Name = "Booths"
+	Booths.Parent = Workspace
+end
 
 -------------------------------------------------------------------------------
 -- Configuration
@@ -117,6 +125,74 @@ if USE_DATASTORE then
 	else
 		warn("[Booth] DataStore unavailable, permanent images will not persist: " .. tostring(res))
 	end
+end
+
+-------------------------------------------------------------------------------
+-- Self healing
+-------------------------------------------------------------------------------
+--[[
+	Booths only work if they live in Workspace.Booths, because that is the only
+	place this script looks. Duplicating in Studio leaves them loose in
+	Workspace (often still called "boothgood"), which silently breaks claiming.
+
+	So instead of needing a Command Bar fix, the server sweeps Workspace on
+	start, adopts anything that looks like a booth, and renames it. Nothing to
+	run by hand, and it repairs itself every time the place boots.
+--]]
+
+-- Does this model have the parts a booth needs? Deliberately does NOT care
+-- what it is called or where it currently lives.
+local function LooksLikeBooth(m)
+	if not m:IsA("Model") then
+		return false
+	end
+
+	local d = m:FindFirstChild("Display")
+	if not d then
+		return false
+	end
+	if not d:FindFirstChild("BoothOwner") then
+		return false
+	end
+
+	local sg = d:FindFirstChild("SurfaceGui")
+	if not sg then
+		return false
+	end
+	if not sg:FindFirstChild("ImageLabel") or not sg:FindFirstChild("TextLabel") then
+		return false
+	end
+
+	local at = d:FindFirstChild("Attachment")
+	if not at or not at:FindFirstChild("ProximityPrompt") then
+		return false
+	end
+
+	return m:FindFirstChild("PartNamePlayer") ~= nil
+end
+
+local function CollectBooths()
+	local adopted = 0
+
+	for _, x in ipairs(Workspace:GetDescendants()) do
+		if x ~= Booths and LooksLikeBooth(x) and not x:IsDescendantOf(Booths) then
+			x.Name = "Booth"
+			x.Parent = Booths
+			adopted = adopted + 1
+		end
+	end
+
+	-- Tidy the names of anything already inside.
+	for _, x in ipairs(Booths:GetChildren()) do
+		if LooksLikeBooth(x) and x.Name ~= "Booth" then
+			x.Name = "Booth"
+		end
+	end
+
+	if adopted > 0 then
+		print("[Booth] Adopted " .. adopted .. " booth(s) into Workspace.Booths.")
+	end
+	return adopted
 end
 
 -------------------------------------------------------------------------------
@@ -314,6 +390,125 @@ local function FindBoomboxTemplate()
 	end
 	return nil
 end
+
+--[[
+	Builds the tool at run time, so there is no Command Bar step and no model
+	to insert.
+
+	The tool deliberately contains NO scripts inside it. Script.Source can only
+	be written by a plugin, never at run time, so a generated tool could never
+	carry its own code. Instead the tool is just Handle + Sound + RemoteEvent,
+	and both halves of the logic live in the two scripts you already paste:
+	this one drives the sound, the MainUI client draws the little UI.
+--]]
+local BoomboxRemote = ReplicatedStorage:FindFirstChild("BoomboxRemote")
+if not BoomboxRemote then
+	BoomboxRemote = Instance.new("RemoteEvent")
+	BoomboxRemote.Name = "BoomboxRemote"
+	BoomboxRemote.Parent = ReplicatedStorage
+end
+
+local function EnsureBoombox()
+	local existing = FindBoomboxTemplate()
+	if existing then
+		return existing
+	end
+
+	local tool = Instance.new("Tool")
+	tool.Name = "Boombox"
+	tool.RequiresHandle = true
+	tool.CanBeDropped = false
+	tool.ToolTip = "Play any audio ID"
+
+	local handle = Instance.new("Part")
+	handle.Name = "Handle"
+	handle.Size = Vector3.new(2, 1.2, 0.8)
+	handle.BrickColor = BrickColor.new("Really black")
+	handle.Material = Enum.Material.SmoothPlastic
+	handle.TopSurface = Enum.SurfaceType.Smooth
+	handle.BottomSurface = Enum.SurfaceType.Smooth
+	handle.Parent = tool
+
+	local sound = Instance.new("Sound")
+	sound.Name = "BoomboxSound"
+	sound.Volume = 1
+	sound.Looped = true
+	sound.RollOffMaxDistance = 90
+	sound.Parent = handle
+
+	tool.Parent = ServerStorage
+	print("[Boombox] Built ServerStorage.Boombox")
+	return tool
+end
+
+-- Finds the Sound on whichever copy of the tool this player is holding.
+local function BoomboxSoundFor(Player)
+	local char = Player.Character
+	local places = {}
+	if char then
+		places[#places + 1] = char
+	end
+	local bp = Player:FindFirstChildOfClass("Backpack")
+	if bp then
+		places[#places + 1] = bp
+	end
+
+	for _, where in ipairs(places) do
+		local tool = where:FindFirstChild("Boombox")
+		if tool then
+			local handle = tool:FindFirstChild("Handle")
+			if handle then
+				local s = handle:FindFirstChild("BoomboxSound")
+				if s then
+					return s
+				end
+			end
+		end
+	end
+	return nil
+end
+
+local LastBoombox = {}
+
+BoomboxRemote.OnServerEvent:Connect(function(Player, action, value)
+	-- Owning the pass is required, not just holding a copy of the tool.
+	if not PlayerOwns(Player, "BOOMBOX", true) then
+		return
+	end
+
+	local now = tick()
+	local last = LastBoombox[Player]
+	if last and (now - last) < 1 then
+		return
+	end
+	LastBoombox[Player] = now
+
+	local sound = BoomboxSoundFor(Player)
+	if not sound then
+		return
+	end
+
+	if action == "Play" then
+		if type(value) ~= "string" and type(value) ~= "number" then
+			return
+		end
+		local digits = string.match(tostring(value), "^%s*(%d+)%s*$")
+		if not digits or string.len(digits) > 18 then
+			return
+		end
+		sound:Stop()
+		sound.SoundId = "rbxassetid://" .. digits
+		local ok, err = pcall(function()
+			sound:Play()
+		end)
+		if not ok then
+			warn("[Boombox] Could not play " .. digits .. ": " .. tostring(err))
+		end
+
+	elseif action == "Stop" then
+		sound:Stop()
+	end
+end)
 
 local function GiveBoombox(Player)
 	if not PlayerOwns(Player, "BOOMBOX", true) then
@@ -680,6 +875,10 @@ MarketplaceService.PromptGamePassPurchaseFinished:Connect(OnPurchaseFinished)
 -------------------------------------------------------------------------------
 -- Start up
 -------------------------------------------------------------------------------
+
+-- Adopt any loose booths before indexing, so duplicated ones just work.
+CollectBooths()
+EnsureBoombox()
 
 local ordered = Booths:GetChildren()
 table.sort(ordered, function(a, b)

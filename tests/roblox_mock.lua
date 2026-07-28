@@ -23,18 +23,24 @@ local new
 local Instance_mt = {}
 Instance_mt.__newindex = function(t, k, v)
   if k == "Parent" then
-    local old = rawget(t, "Parent")
+    local old = rawget(t, "_parent")
     if old then
       local ok = rawget(old, "_kids")
       for i, c in ipairs(ok) do if c == t then table.remove(ok, i) break end end
     end
-    rawset(t, "Parent", v)
+    rawset(t, "_parent", v)
     if v then table.insert(rawget(v, "_kids"), t) end
     return
   end
   rawset(t, k, v)
 end
 Instance_mt.__index = function(t, k)
+  if k == "Parent" then return rawget(t, "_parent") end
+  if k == "Position" then
+    local cf = rawget(t, "CFrame")
+    if cf then return cf end
+    return nil
+  end
   local kids = rawget(t, "_kids")
   if kids then for _, c in ipairs(kids) do if rawget(c,"Name") == k then return c end end end
   return rawget(Instance_mt, k)
@@ -44,6 +50,15 @@ function Instance_mt.FindFirstChild(self, n)
   return nil
 end
 function Instance_mt.IsA(self, c) return rawget(self,"ClassName") == c end
+function Instance_mt.IsDescendantOf(self, other)
+  if other == nil then return false end
+  local cur = rawget(self,"_parent")
+  while cur do
+    if cur == other then return true end
+    cur = rawget(cur,"_parent")
+  end
+  return false
+end
 function Instance_mt.Clone(self)
   local c = new(rawget(self,"ClassName"), rawget(self,"Name"), nil)
   for k,v in pairs(self) do
@@ -76,8 +91,7 @@ function Instance_mt.WaitForChild(self, n) return Instance_mt.FindFirstChild(sel
 
 new = function(class, name, parent)
   local o = setmetatable({ClassName=class, Name=name, _kids={}, Value=nil}, Instance_mt)
-  rawset(o, "Parent", parent)
-  if parent then table.insert(rawget(parent,"_kids"), o) end
+  if parent then o.Parent = parent end
   return o
 end
 M.new = new
@@ -98,8 +112,24 @@ function M.install(env, opts)
   env.delay = function(_, f) table.insert(M.delayed, f) end
 
   local Instance = {}
-  function Instance.new(c) return new(c, c, nil) end
+  function Instance.new(c)
+    local o = new(c, c, nil)
+    if c == "Folder" or c == "Model" then
+      o.ChildAdded = newSignal()
+    end
+    if c == "RemoteEvent" then
+      o.OnServerEvent = newSignal()
+      o.FireClient = function() end
+      o.FireAllClients = function() end
+    end
+    return o
+  end
   env.Instance = Instance
+  env.BrickColor = {new=function() return {} end}
+  env.Vector3 = {new=function(x,y,z) return {X=x,Y=y,Z=z} end}
+  env.Enum = {
+    SurfaceType={Smooth=1}, Material={SmoothPlastic=1},
+  }
 
   -- services
   local ReplicatedStorage = new("ReplicatedStorage","ReplicatedStorage")
@@ -112,11 +142,13 @@ function M.install(env, opts)
     table.insert(M.toClient, {plr=plr, a=a, b=b})
   end
   M.remote = remote
+  M.RS = ReplicatedStorage
 
   local Workspace = new("Workspace","Workspace")
   local booths = new("Folder","Booths",Workspace)
   booths.ChildAdded = newSignal()
   M.booths = booths
+  M.Workspace = Workspace
 
   local Players = new("Players","Players")
   Players.PlayerAdded = newSignal()
