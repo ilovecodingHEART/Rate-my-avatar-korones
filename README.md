@@ -200,7 +200,7 @@ a test for each of those cases.
 python3 tools/runtests.py
 ```
 
-291 tests. They run the real `Server.server.lua` and `Client.client.lua`
+318 tests. They run the real `Server.server.lua` and `Client.client.lua`
 against a mock of the Roblox API (`tools/mock_roblox.lua`, `tools/harness.lua`)
 and drive both halves the way a player would, including pressing client buttons
 and checking what the server actually did.

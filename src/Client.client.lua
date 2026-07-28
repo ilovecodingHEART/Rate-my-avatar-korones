@@ -330,8 +330,16 @@ Padding.PaddingBottom = UDim.new(0.02, 0)
 local HUD = {
 	MinWidth = 104,
 	MinHeight = 34,
-	-- Pixels, not scale, so the spacing always matches the button height.
-	Pad = 8,
+	--[[
+		The gap between buttons, in pixels.
+
+		Has to cover two things at once: the visual gap, and the amount the
+		UISizeConstraint can lift a button above its scale height on a small
+		window. 20 is the smallest value that never lets them touch between
+		1080p and roughly 600x320, while still reading as one stack rather
+		than four scattered buttons.
+	--]]
+	Pad = 20,
 	-- button -> slot, so the stack can be relaid out and hidden as a group.
 	Placed = {},
 }
@@ -422,6 +430,22 @@ function HUD.Refresh()
 	HUD.Show(not HUD.Hidden)
 end
 
+--[[
+	Stacked upwards from the toggle.
+
+	The spacing is carried in BOTH parts of the UDim2, matching how the button
+	itself is sized:
+
+	    scale  = the button's own scale height, so the gap grows with the
+	             button on a tall window
+	    offset = the pad, plus enough to clear the pixel floor on a short one
+
+	Doing it in pixels alone was wrong. The step was worked out once from
+	whatever ScreenGui.AbsoluteSize happened to be at build time and then baked
+	into an offset, so at 1080p the buttons were 77px tall but still stacked
+	50px apart and overlapped by 27. Scale spacing tracks scale sizing for
+	free, at every window size, with nothing to recompute on resize.
+--]]
 local function PlaceHudButton(button, slot)
 	HUD.Placed[button] = slot
 	button.Size = HUD.Size
@@ -436,24 +460,31 @@ local function PlaceHudButton(button, slot)
 	limit.MinSize = Vector2.new(HUD.MinWidth, HUD.MinHeight)
 
 	--[[
-		Spacing has to clear the button at its LARGEST, and the constraint only
-		makes it bigger. Measuring the scale height against the same screen the
-		button is drawn on is the only way the two agree; using the raw offset
-		ignored the scale part entirely and let them overlap on a tall window.
-	--]]
-	local screenY = ScreenGui.AbsoluteSize.Y
-	if screenY <= 0 then
-		screenY = 720
-	end
+		The gap has to clear whichever of the two is deciding the height, and
+		which one that is changes with the window:
 
-	local drawnHeight = math.max(HUD.Size.Y.Scale * screenY + HUD.Size.Y.Offset, HUD.MinHeight)
-	local step = drawnHeight + HUD.Pad
+		    big window    the scale height wins
+		    small window  the UISizeConstraint floor wins
+
+		Both are covered by carrying the scale height in the scale part and a
+		fixed pad in the offset, with the pad sized to absorb how far the
+		constraint can lift a button on a small window.
+
+		Deliberately no measurement of ScreenGui.AbsoluteSize here, because
+		measuring the screen is what broke this twice: the step was computed
+		once from whatever the size happened to be when the button was built,
+		then baked into a fixed offset, so it was only ever right at that one
+		size. This version cannot go stale, and needs no resize event to be
+		correct.
+	--]]
+	local stepScale = HUD.Size.Y.Scale
+	local stepOffset = HUD.Size.Y.Offset + HUD.Pad
 
 	button.Position = UDim2.new(
 		HUD.Anchor.X.Scale,
 		HUD.Anchor.X.Offset,
-		HUD.Anchor.Y.Scale,
-		HUD.Anchor.Y.Offset - step * slot
+		HUD.Anchor.Y.Scale - stepScale * slot,
+		HUD.Anchor.Y.Offset - stepOffset * slot
 	)
 end
 
@@ -852,19 +883,30 @@ local function RankColour(rank)
 	return THEME.PlayerBadge
 end
 
--- Toggle button, bottom right with the other two.
+--[[
+	Cloned from ToggleButton, not built from nothing.
+
+	ShopButton is a clone, so it draws its caption through a child TextLabel
+	that carries the place's own font, stroke and padding. This one was an
+	Instance.new with the text set directly on the button, so the two rendered
+	visibly differently sitting next to each other - different weight, and the
+	caption sat off centre against its neighbour.
+
+	Cloning gets the same child and the same look for free, and SetCaption
+	writes to whichever of the two a button actually uses.
+--]]
 local AdminButton = ScreenGui:FindFirstChild("AdminButton")
 if not AdminButton then
-	AdminButton = Instance.new("TextButton")
+	AdminButton = ToggleButton:Clone()
 	AdminButton.Name = "AdminButton"
 	AdminButton.Parent = ScreenGui
 end
 PlaceHudButton(AdminButton, 2)
-AdminButton.Text = "Admin"
+SetCaption(AdminButton, "Admin")
 AdminButton.TextScaled = true
 AdminButton.Font = TITLE_FONT
 AdminButton.BackgroundColor3 = THEME.AdminBackground
-AdminButton.TextColor3 = THEME.AdminText
+StyleCaption(AdminButton, THEME.AdminText)
 AdminButton.BorderSizePixel = 0
 AdminButton.Visible = false
 GetOrMakeCorner(AdminButton, SHOP_CORNER)
@@ -2914,30 +2956,24 @@ end)
 	any other player text.
 --]]
 
+-- Cloned for the same reason as AdminButton: it inherits the TextLabel that
+-- makes every button in the stack render alike.
 local ReportButton = ScreenGui:FindFirstChild("ReportButton")
 if not ReportButton then
-	ReportButton = Instance.new("TextButton")
+	ReportButton = ToggleButton:Clone()
 	ReportButton.Name = "ReportButton"
 	ReportButton.Parent = ScreenGui
 end
 PlaceHudButton(ReportButton, 3)
 
---[[
-	The stacking step is derived from the button's drawn height, which depends
-	on the window, so the whole stack is laid out again whenever that changes.
-	Without this the spacing is only correct at whatever size the player
-	happened to join at.
---]]
-ScreenGui:GetPropertyChangedSignal("AbsoluteSize"):Connect(function()
-	for button, slot in pairs(HUD.Placed) do
-		PlaceHudButton(button, slot)
-	end
-end)
-ReportButton.Text = "Report"
+-- No resize handler needed for the stack: the positions are expressed in the
+-- same scale-plus-offset terms as the sizes, so they follow the window on
+-- their own. HUD.Placed is still kept, for hiding the stack as a group.
+SetCaption(ReportButton, "Report")
 ReportButton.TextScaled = true
 ReportButton.Font = TITLE_FONT
 ReportButton.BackgroundColor3 = THEME.ReportBackground
-ReportButton.TextColor3 = THEME.ReportText
+StyleCaption(ReportButton, THEME.ReportText)
 ReportButton.BorderSizePixel = 0
 ReportButton.Visible = true
 GetOrMakeCorner(ReportButton, SHOP_CORNER)

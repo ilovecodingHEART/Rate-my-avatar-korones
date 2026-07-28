@@ -480,6 +480,74 @@ test("the HUD buttons never overlap each other", function(H)
 	end
 end)
 
+test("every HUD button is built the same way", function(H)
+	--[[
+		ShopButton was a clone of ToggleButton, so it drew its caption through
+		a child TextLabel carrying the place's own font and stroke. Admin and
+		Report were Instance.new with the text set straight on the button, so
+		the two rendered differently sitting next to each other.
+	--]]
+	local admin = H.addPlayer("qzc", 78857)
+	H.drain()
+	H.runClient(admin)
+
+	local gui = H.clientGui
+	for _, name in ipairs({"TextButton", "ShopButton", "AdminButton", "ReportButton"}) do
+		local b = H.findIn(gui, name)
+		ok(b ~= nil, name .. " exists")
+
+		local label = b:FindFirstChild("TextLabel")
+		ok(label ~= nil, name .. " draws its caption through a TextLabel")
+		eq(b.Text, "", name .. " does not also set text on the button itself")
+	end
+
+	-- And the captions actually landed on those labels.
+	eq(H.findIn(gui, "AdminButton").TextLabel.Text, "Admin", "admin caption")
+	eq(H.findIn(gui, "ReportButton").TextLabel.Text, "Report", "report caption")
+	eq(H.findIn(gui, "ShopButton").TextLabel.Text, "Shop", "shop caption")
+end)
+
+test("the HUD stack never overlaps at any window size", function(H)
+	--[[
+		The step used to be baked into a pixel offset from one measurement of
+		the screen, so at 1080p the buttons were 77px tall but still stacked
+		50px apart. The spacing is carried in scale and offset now, matching
+		how the button is sized, so it holds at every size rather than the one
+		the player happened to join at.
+	--]]
+	local admin = H.addPlayer("qzc", 78857)
+	H.drain()
+	H.runClient(admin)
+
+	local gui = H.clientGui
+	local names = {"TextButton", "ShopButton", "AdminButton", "ReportButton"}
+
+	for _, screen in ipairs({{1920, 1080}, {1280, 720}, {1024, 576}, {617, 326}}) do
+		local w, h = screen[1], screen[2]
+
+		local drawn = {}
+		for _, name in ipairs(names) do
+			local b = H.findIn(gui, name)
+			drawn[#drawn + 1] = {
+				Name = name,
+				Y = b.Position.Y.Scale * h + b.Position.Y.Offset,
+				H = math.max(b.Size.Y.Scale * h + b.Size.Y.Offset, 34),
+			}
+		end
+
+		table.sort(drawn, function(a, b)
+			return a.Y < b.Y
+		end)
+
+		for i = 1, #drawn - 1 do
+			local gap = drawn[i + 1].Y - drawn[i].Y
+			ok(gap >= drawn[i].H,
+				string.format("%dx%d: %s clears %s (gap %.0f, height %.0f)",
+					w, h, drawn[i + 1].Name, drawn[i].Name, gap, drawn[i].H))
+		end
+	end
+end)
+
 test("opening a window hides the HUD, closing brings it back", function(H)
 	local admin = H.addPlayer("qzc", 78857)
 	H.drain()

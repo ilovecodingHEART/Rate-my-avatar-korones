@@ -646,11 +646,23 @@ function H.buildMainUI()
 	frame.Visible = false
 	frame.Parent = gui
 
-	local function styledButton(name, parent)
+	--[[
+		The real geometry out of the place file, not invented numbers.
+
+		These used to be {0.5, 0.1} at {0.9, 0.9}, which is nothing like the
+		actual ToggleButton. Every HUD calculation the client makes is derived
+		from this button, so testing against made-up dimensions meant the tests
+		could not see sizing bugs at all - and one shipped twice.
+
+		    Frame        Size {0.400, 0.400}  Pos {0.500, 0.500}
+		    TextButton   Size {0.107, 0.071}  Pos {0.007, 0.550}
+		    ChangeText   Size {0.515, 0.125}  Pos {0.500, 0.734}
+	--]]
+	local function styledButton(name, parent, size, pos)
 		local b = Instance_new("TextButton", name)
 		b.Text = ""
-		b.Size = _G.UDim2.new(0.5, 0, 0.1, 0)
-		b.Position = _G.UDim2.new(0.9, 0, 0.9, 0)
+		b.Size = size or _G.UDim2.new(0.515, 0, 0.125, 0)
+		b.Position = pos or _G.UDim2.new(0.5, 0, 0.734, 0)
 		local label = Instance_new("TextLabel", "TextLabel")
 		label.Text = ""
 		label.Parent = b
@@ -675,7 +687,11 @@ function H.buildMainUI()
 	Instance_new("UICorner", "UICorner").Parent = frame
 	Instance_new("UIStroke", "UIStroke").Parent = frame
 
-	local toggle = styledButton("TextButton", gui)
+	local toggle = styledButton(
+		"TextButton", gui,
+		_G.UDim2.new(0.107, 0, 0.071, 0),
+		_G.UDim2.new(0.007, 0, 0.550, 0)
+	)
 
 	H.gui = gui
 	return gui

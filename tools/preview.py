@@ -194,7 +194,8 @@ def draw(path, page, out_path, screen=None):
 
     bw = max(0.107 * SCREEN_W, min_w)
     bh = max(0.071 * SCREEN_H, min_h)
-    step = bh + pad
+    # Same as PlaceHudButton: scale height in the scale part, pad in offset.
+    step = 0.071 * SCREEN_H + pad
     bx = 0.007 * SCREEN_W
     base = 0.550 * SCREEN_H
 

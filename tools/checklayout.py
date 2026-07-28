@@ -434,19 +434,34 @@ def check(path, verbose=True):
         #   a genuinely broken gap still reported clean. Reading the source
         #   means the check can actually disagree with the implementation.
         #]]
+        #[[
+        #   The step is a UDim2: a scale part and an offset part, read out of
+        #   PlaceHudButton rather than recomputed here. Deriving it from the
+        #   same formula the code uses would only ever agree with itself, which
+        #   is how an earlier version of this check passed while the buttons
+        #   visibly overlapped.
+        #]]
         gap_px = None
-        step = re.search(r"local step = (.+)", src)
-        if step:
-            expr = step.group(1).strip()
-            expr = expr.replace("math.max", "max")
-            expr = expr.replace("drawnHeight", repr(bh))
-            expr = expr.replace("HUD.MinHeight", repr(hud_min_h))
-            expr = expr.replace("HUD.Pad", repr(hud_pad if hud_pad else 0))
-            expr = expr.replace("HUD.Size.Y.Offset", repr(bh))
-            try:
-                gap_px = float(eval(expr, {"__builtins__": {}}, {"max": max}))
-            except Exception:
-                gap_px = None
+        m_scale = re.search(r"local stepScale = (.+)", src)
+        m_offset = re.search(r"local stepOffset = (.+)", src)
+
+        if m_scale and m_offset:
+            def resolve(expr, screen_axis):
+                expr = expr.strip()
+                expr = expr.replace("math.max", "max")
+                expr = expr.replace("HUD.Size.Y.Scale", repr(toggle[1]))
+                expr = expr.replace("HUD.Size.Y.Offset", "0")
+                expr = expr.replace("HUD.MinHeight", repr(hud_min_h))
+                expr = expr.replace("HUD.Pad", repr(hud_pad if hud_pad else 0))
+                try:
+                    return float(eval(expr, {"__builtins__": {}}, {"max": max}))
+                except Exception:
+                    return None
+
+            sc = resolve(m_scale.group(1), SCREEN_H)
+            off = resolve(m_offset.group(1), SCREEN_H)
+            if sc is not None and off is not None:
+                gap_px = sc * SCREEN_H + off
 
         if gap_px is None:
             gap_px = (named_number(src, "Gap") or 0) * SCREEN_H
