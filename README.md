@@ -29,15 +29,19 @@ The cube spins continuously while the bar fills:
 
 #### Swapping in your own logo
 
+The logo sits **above** the title; the title and subtitle stay visible under
+it. Until you set an image a dashed `LOGO_IMAGE` placeholder box is drawn, so
+the spacing is already correct while you make the art.
+
 Top of `LoadingScreen.client.lua`:
 
 ```lua
-local LOGO_IMAGE = "rbxassetid://123456789"   -- replaces the text title
+local LOGO_IMAGE = "rbxassetid://123456789"   -- the logo above the title
 local CUBE_IMAGE = "rbxassetid://123456789"   -- replaces the white cube
 ```
 
-Leave either as `""` to keep the default. With `LOGO_IMAGE` set the text title
-hides itself automatically.
+Leave either as `""` to keep the placeholder / default cube. `LOGO_ASPECT`
+sets the box shape (width / height) and `LOGO_HEIGHT` its size.
 
 The fonts are `SourceSans` / `SourceSansLight`, the same thin faces the real
 Roblox loader uses. `SHOW_BAR = false` removes the progress bar for a pure

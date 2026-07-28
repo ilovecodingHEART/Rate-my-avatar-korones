@@ -25,17 +25,20 @@ local LOAD_SECONDS = 5
 local FADE_SECONDS = 0.6
 
 local TITLE = "Rate My Avatar"
-local SUBTITLE = "By Korone"
+local SUBTITLE = "By Thugshaker"
 
 --[[
-	Optional logo shown above the title. Fill this in when you have one:
+	Logo image, shown ABOVE the title. The title and subtitle stay visible
+	underneath it. Fill this in when you have the art:
 
 	    local LOGO_IMAGE = "rbxassetid://123456789"
 
-	Leave it as "" and the text title is used on its own.
+	Leave it as "" and a dashed placeholder box is drawn in its place, so the
+	layout is already correct while you are still making the image.
 --]]
 local LOGO_IMAGE = ""
-local LOGO_HEIGHT = 0.20 -- fraction of screen height
+local LOGO_HEIGHT = 0.30 -- fraction of the centre block
+local LOGO_ASPECT = 1.5 -- width / height of the logo box
 
 --[[
 	The spinning cube. Leave CUBE_IMAGE as "" to draw a plain white square,
@@ -92,42 +95,75 @@ back.Parent = gui
 -- Everything centred sits in here so the block can be nudged as one piece.
 local centre = Instance.new("Frame")
 centre.Name = "Centre"
-centre.Size = UDim2.new(1, 0, 0.4, 0)
+centre.Size = UDim2.new(1, 0, 0.62, 0)
 centre.Position = UDim2.new(0.5, 0, 0.5, 0)
 centre.AnchorPoint = Vector2.new(0.5, 0.5)
 centre.BackgroundTransparency = 1
 centre.Parent = back
 
-local logo = nil
+-- Logo sits above the title, and the title stays visible underneath it.
+local logo = Instance.new("ImageLabel")
+logo.Name = "Logo"
+logo.Size = UDim2.new(0, 0, LOGO_HEIGHT, 0)
+logo.Position = UDim2.new(0.5, 0, 0.30, 0)
+logo.AnchorPoint = Vector2.new(0.5, 0.5)
+logo.BackgroundTransparency = 1
+logo.BorderSizePixel = 0
+logo.ScaleType = Enum.ScaleType.Fit
+logo.Parent = centre
+
+-- Width follows the height, so the box keeps its shape on any screen.
+local logoRatio = Instance.new("UIAspectRatioConstraint")
+logoRatio.AspectRatio = LOGO_ASPECT
+logoRatio.Parent = logo
+
 if LOGO_IMAGE ~= "" then
-	logo = Instance.new("ImageLabel")
-	logo.Name = "Logo"
-	logo.Size = UDim2.new(1, 0, LOGO_HEIGHT * 2.5, 0)
-	logo.Position = UDim2.new(0.5, 0, 0.16, 0)
-	logo.AnchorPoint = Vector2.new(0.5, 0.5)
-	logo.BackgroundTransparency = 1
 	logo.Image = LOGO_IMAGE
-	logo.ScaleType = Enum.ScaleType.Fit
-	logo.Parent = centre
+else
+	-- Placeholder so the spacing is already right before the art exists.
+	logo.Image = ""
+	logo.BackgroundTransparency = 0.85
+	logo.BackgroundColor3 = THEME.Title
+
+	local ph = Instance.new("UIStroke")
+	ph.Color = THEME.Subtitle
+	ph.Thickness = 2
+	ph.Transparency = 0.4
+	ph.Parent = logo
+
+	local pc = Instance.new("UICorner")
+	pc.CornerRadius = UDim.new(0, 6)
+	pc.Parent = logo
+
+	local phText = Instance.new("TextLabel")
+	phText.Name = "PlaceholderText"
+	phText.Size = UDim2.new(1, 0, 0.26, 0)
+	phText.Position = UDim2.new(0.5, 0, 0.5, 0)
+	phText.AnchorPoint = Vector2.new(0.5, 0.5)
+	phText.BackgroundTransparency = 1
+	phText.Text = "LOGO_IMAGE"
+	phText.TextColor3 = THEME.Subtitle
+	phText.TextScaled = true
+	phText.Font = BODY_FONT
+	phText.Parent = logo
 end
 
 local title = Instance.new("TextLabel")
 title.Name = "Title"
-title.Size = UDim2.new(0.8, 0, 0.16, 0)
-title.Position = UDim2.new(0.5, 0, 0.5, 0)
+title.Size = UDim2.new(0.8, 0, 0.115, 0)
+title.Position = UDim2.new(0.5, 0, 0.58, 0)
 title.AnchorPoint = Vector2.new(0.5, 0.5)
 title.BackgroundTransparency = 1
 title.Text = TITLE
 title.TextColor3 = THEME.Title
 title.TextScaled = true
 title.Font = TITLE_FONT
-title.Visible = (LOGO_IMAGE == "")
 title.Parent = centre
 
 local subtitle = Instance.new("TextLabel")
 subtitle.Name = "Subtitle"
-subtitle.Size = UDim2.new(0.8, 0, 0.075, 0)
-subtitle.Position = UDim2.new(0.5, 0, 0.645, 0)
+subtitle.Size = UDim2.new(0.8, 0, 0.055, 0)
+subtitle.Position = UDim2.new(0.5, 0, 0.695, 0)
 subtitle.AnchorPoint = Vector2.new(0.5, 0.5)
 subtitle.BackgroundTransparency = 1
 subtitle.Text = SUBTITLE
@@ -141,8 +177,8 @@ local barBack, fill
 if SHOW_BAR then
 	barBack = Instance.new("Frame")
 	barBack.Name = "BarBack"
-	barBack.Size = UDim2.new(0.3, 0, 0.006, 0)
-	barBack.Position = UDim2.new(0.5, 0, 0.78, 0)
+	barBack.Size = UDim2.new(0.3, 0, 0.009, 0)
+	barBack.Position = UDim2.new(0.5, 0, 0.80, 0)
 	barBack.AnchorPoint = Vector2.new(0.5, 0.5)
 	barBack.BackgroundColor3 = THEME.BarBackground
 	barBack.BorderSizePixel = 0
@@ -166,8 +202,8 @@ end
 
 local counter = Instance.new("TextLabel")
 counter.Name = "Counter"
-counter.Size = UDim2.new(0.6, 0, 0.06, 0)
-counter.Position = UDim2.new(0.5, 0, 0.88, 0)
+counter.Size = UDim2.new(0.6, 0, 0.045, 0)
+counter.Position = UDim2.new(0.5, 0, 0.90, 0)
 counter.AnchorPoint = Vector2.new(0.5, 0.5)
 counter.BackgroundTransparency = 1
 counter.Text = "Loading assets.. 0 / " .. TOTAL_ASSETS
@@ -253,6 +289,17 @@ local function fadeOut()
 
 	if logo then
 		TweenService:Create(logo, info, {ImageTransparency = 1}):Play()
+		if LOGO_IMAGE == "" then
+			TweenService:Create(logo, info, {BackgroundTransparency = 1}):Play()
+			local ps = logo:FindFirstChildOfClass("UIStroke")
+			if ps then
+				TweenService:Create(ps, info, {Transparency = 1}):Play()
+			end
+			local pt = logo:FindFirstChild("PlaceholderText")
+			if pt then
+				TweenService:Create(pt, info, {TextTransparency = 1}):Play()
+			end
+		end
 	end
 	if barBack then
 		TweenService:Create(barBack, info, {BackgroundTransparency = 1}):Play()

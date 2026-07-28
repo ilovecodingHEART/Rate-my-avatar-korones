@@ -32,6 +32,8 @@ PASSES.sort(key=lambda p: ORDER.index(p['key']))
 TOTAL=int(re.search(r'TOTAL_ASSETS = (\d+)', LOADER).group(1))
 LTITLE=re.search(r'^local TITLE = "([^"]+)"', LOADER, re.M).group(1)
 LSUB=re.search(r'^local SUBTITLE = "([^"]*)"', LOADER, re.M).group(1)
+LLOGO=re.search(r'^local LOGO_IMAGE = "([^"]*)"', LOADER, re.M).group(1)
+LASPECT=float(re.search(r'^local LOGO_ASPECT = ([\d.]+)', LOADER, re.M).group(1))
 
 S=3
 def font(px, bold=False):
@@ -212,13 +214,26 @@ def loading(path, pct=0.62, spin=20):
     W,H=760*S,428*S
     img=Image.new('RGB',(W,H),LT['Background']); d=ImageDraw.Draw(img)
 
+    # logo box above the title (placeholder while LOGO_IMAGE is empty)
+    lh=int(0.185*H); lw=int(lh*LASPECT)
+    lx0,ly0=(W-lw)//2, int(0.335*H)
+    lb=(lx0,ly0,lx0+lw,ly0+lh)
+    if LLOGO:
+        d.rounded_rectangle(lb,radius=6*S,fill=(90,90,90))
+    else:
+        ov=Image.new('RGBA',(lw,lh),(0,0,0,0)); od=ImageDraw.Draw(ov)
+        od.rounded_rectangle((0,0,lw-1,lh-1),radius=6*S,
+                             fill=LT['Title']+(38,), outline=LT['Subtitle']+(150,), width=2*S)
+        img.paste(Image.alpha_composite(img.crop(lb).convert('RGBA'),ov).convert('RGB'),(lx0,ly0))
+        ctext(d,lb,"LOGO_IMAGE",font(int(lh*0.20)),LT['Subtitle'])
+
     # title + subtitle, centred, thin type
-    ctext(d,(0,int(0.555*H),W,int(0.625*H)),LTITLE,font(int(0.058*H)),LT['Title'])
-    ctext(d,(0,int(0.632*H),W,int(0.672*H)),LSUB,font(int(0.030*H)),LT['Subtitle'])
+    ctext(d,(0,int(0.565*H),W,int(0.635*H)),LTITLE,font(int(0.058*H)),LT['Title'])
+    ctext(d,(0,int(0.648*H),W,int(0.688*H)),LSUB,font(int(0.030*H)),LT['Subtitle'])
 
     # thin progress bar
     bw,bh=0.30*W,max(0.006*H,3*S)
-    bx0,by0=(W-bw)/2,0.712*H
+    bx0,by0=(W-bw)/2,0.735*H
     d.rounded_rectangle((bx0,by0,bx0+bw,by0+bh),radius=int(bh/2),fill=LT['BarBackground'])
     eased=1-(1-pct)*(1-pct)
     fw=bw*eased
@@ -226,7 +241,7 @@ def loading(path, pct=0.62, spin=20):
         d.rounded_rectangle((bx0,by0,bx0+fw,by0+bh),radius=int(bh/2),fill=LT['BarFill'])
 
     shown=int(eased*TOTAL)
-    ctext(d,(0,int(0.755*H),W,int(0.80*H)),
+    ctext(d,(0,int(0.775*H),W,int(0.82*H)),
           "Loading assets.. %d / %d"%(shown,TOTAL),font(int(0.026*H)),LT['Counter'])
 
     # spinning cube, bottom right
