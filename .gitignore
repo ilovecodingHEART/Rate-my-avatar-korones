@@ -1,0 +1,4 @@
+# Scratch output from the parser / build tools
+/tmp/
+*.rbxl.new
+__pycache__/

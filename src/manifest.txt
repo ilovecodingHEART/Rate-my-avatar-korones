@@ -1,0 +1,3 @@
+# instance path in the place	source file in this folder
+ServerScriptService/Server	Server.server.lua
+StarterGui/MainUI/Client	Client.client.lua
