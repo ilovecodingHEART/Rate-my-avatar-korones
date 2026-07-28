@@ -160,6 +160,32 @@ The other checks are small and specific:
 | `tools/luacheck.py` | syntax, and how close the file is to Lua's 200 local limit |
 | `tools/luaorder.py` | calling a `local function` declared further down, which reads as a nil global rather than erroring |
 | `tools/luaglobals.py` | calling a name that is never declared, usually a typo or a half finished rename |
+| `tools/checklayout.py` | widgets overlapping, overflowing their parent, or too short to render text |
+
+## Checking the layout
+
+The panel is built in code, so nothing in the `.rbxl` says what it looks like
+and a bad number just quietly draws one thing on top of another.
+`tools/checklayout.py` resolves the Size/Position/AnchorPoint values as
+written, composes them down the parent chain, and reports the result in pixels:
+
+```
+python3 tools/checklayout.py src/Client.client.lua
+```
+
+It runs twice, at a normal window and again at the panel's minimum size, since
+scaled-down is where these bugs actually appear. It knows about the square
+headshot whose width comes from its height, which is not visible in the numbers
+on their own.
+
+`tools/preview.py` draws the same maths as a PNG when you want to look at it:
+
+```
+python3 tools/preview.py Home        # or Players, Reports, Staff, Shop
+```
+
+It is not a renderer and does not replace opening Studio, but it is enough to
+see a collision or a squashed row.
 
 The local limit check matters more than it sounds: the client script sits close
 to the ceiling, and going over is a hard compile error rather than a warning.

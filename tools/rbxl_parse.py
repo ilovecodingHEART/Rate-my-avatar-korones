@@ -8,6 +8,9 @@ import zstandard
 TYPE_STRING = 0x01
 TYPE_BOOL = 0x02
 TYPE_INT32 = 0x03
+TYPE_FLOAT = 0x04
+TYPE_UDIM = 0x06
+TYPE_UDIM2 = 0x07
 
 
 def read_chunks(data):
@@ -86,6 +89,22 @@ def read_interleaved_i32(r, count):
     return out
 
 
+def untransform_f32(u):
+    # Roblox rotates the sign bit down to the LSB before interleaving, so
+    # decoding is a rotate right by one.
+    u = ((u >> 1) | (u << 31)) & 0xFFFFFFFF
+    return struct.unpack("<f", struct.pack("<I", u))[0]
+
+
+def read_interleaved_f32(r, count):
+    buf = r.raw(count * 4)
+    out = []
+    for i in range(count):
+        u = (buf[i] << 24) | (buf[count + i] << 16) | (buf[2 * count + i] << 8) | buf[3 * count + i]
+        out.append(untransform_f32(u))
+    return out
+
+
 def accumulate(vals):
     out = []
     acc = 0
@@ -155,6 +174,24 @@ def parse(path):
                 vals = read_interleaved_i32(r, len(refs))
                 for ref, v in zip(refs, vals):
                     inst[ref]["props"][pname] = v
+            elif ptype == TYPE_FLOAT:
+                vals = read_interleaved_f32(r, len(refs))
+                for ref, v in zip(refs, vals):
+                    inst[ref]["props"][pname] = v
+            elif ptype == TYPE_UDIM:
+                scales = read_interleaved_f32(r, len(refs))
+                offsets = read_interleaved_i32(r, len(refs))
+                for ref, sc, off in zip(refs, scales, offsets):
+                    inst[ref]["props"][pname] = (sc, off)
+            elif ptype == TYPE_UDIM2:
+                # Four parallel arrays, grouped by field rather than by
+                # instance: every X scale, then every Y scale, then the offsets.
+                xs = read_interleaved_f32(r, len(refs))
+                ys = read_interleaved_f32(r, len(refs))
+                xo = read_interleaved_i32(r, len(refs))
+                yo = read_interleaved_i32(r, len(refs))
+                for i, ref in enumerate(refs):
+                    inst[ref]["props"][pname] = (xs[i], xo[i], ys[i], yo[i])
             elif ptype == 0x1C:  # SharedString
                 idxs = read_interleaved_i32(r, len(refs))
                 for ref, i in zip(refs, idxs):

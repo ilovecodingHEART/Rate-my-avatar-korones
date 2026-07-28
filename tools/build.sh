@@ -23,6 +23,10 @@ echo "== undeclared names"
 python3 tools/luaglobals.py src/Server.server.lua src/Client.client.lua
 
 echo
+echo "== layout"
+python3 tools/checklayout.py src/Client.client.lua -q
+
+echo
 echo "== tests"
 python3 tools/runtests.py | tail -5
 

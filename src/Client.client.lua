@@ -314,6 +314,44 @@ Padding.PaddingBottom = UDim.new(0.02, 0)
 -- Shop
 -------------------------------------------------------------------------------
 
+--[[
+	The HUD button stack, bottom left.
+
+	These used to each pick their own offset from ToggleButton - 0.085, 0.17,
+	0.255 - which meant the spacing was three numbers in three different parts
+	of the file that all had to agree, and adding a fourth button meant
+	guessing the next one. The stack is defined once here instead.
+
+	A minimum pixel height is applied too. ToggleButton's size is pure scale,
+	so on a small window the buttons shrank until the captions were unreadable,
+	which is what they were doing in the screenshots.
+--]]
+local HUD = {
+	MinWidth = 104,
+	MinHeight = 34,
+	Gap = 0.085,
+}
+
+-- Settled once, before anything is placed, so every button in the stack is
+-- measured against the same value rather than against whatever ToggleButton
+-- happened to be when that particular line ran.
+ToggleButton.Size = UDim2.new(
+	ToggleButton.Size.X.Scale, math.max(ToggleButton.Size.X.Offset, HUD.MinWidth),
+	ToggleButton.Size.Y.Scale, math.max(ToggleButton.Size.Y.Offset, HUD.MinHeight)
+)
+HUD.Size = ToggleButton.Size
+HUD.Anchor = ToggleButton.Position
+
+local function PlaceHudButton(button, slot)
+	button.Size = HUD.Size
+	button.Position = UDim2.new(
+		HUD.Anchor.X.Scale,
+		HUD.Anchor.X.Offset,
+		HUD.Anchor.Y.Scale - HUD.Gap * slot,
+		HUD.Anchor.Y.Offset
+	)
+end
+
 local ShopButton = ScreenGui:FindFirstChild("ShopButton")
 if not ShopButton then
 	ShopButton = ToggleButton:Clone()
@@ -321,21 +359,15 @@ if not ShopButton then
 	ShopButton.Parent = ScreenGui
 end
 ShopButton.Visible = true
-ShopButton.Size = ToggleButton.Size
-ShopButton.Position = UDim2.new(
-	ToggleButton.Position.X.Scale,
-	ToggleButton.Position.X.Offset,
-	ToggleButton.Position.Y.Scale - 0.085,
-	ToggleButton.Position.Y.Offset
-)
+PlaceHudButton(ShopButton, 1)
 SetCaption(ShopButton, "Shop")
 StyleButton(ShopButton, THEME.PanelBackground, THEME.ShopOutline, THEME.Text)
 GetOrMakeCorner(ShopButton, SHOP_CORNER)
 StyleBorder(ShopButton, THEME.ShopOutline, 4)
 AddSheen(ShopButton)
 
--- Match the heavier shop outline on the booth toggle so the two HUD buttons
--- read as a pair.
+-- Match the heavier shop outline on the booth toggle so the HUD buttons read
+-- as one set. Its size was already settled above.
 StyleBorder(ToggleButton, THEME.ShopOutline, 4)
 GetOrMakeCorner(ToggleButton, SHOP_CORNER)
 
@@ -365,22 +397,23 @@ for _, junk in ipairs(ShopFrame:GetChildren()) do
 end
 
 -- Big title sitting above the window, like the reference.
-local ShopTitle = ShopFrame:FindFirstChild("ShopTitle")
-if not ShopTitle then
-	ShopTitle = Instance.new("TextLabel")
-	ShopTitle.Name = "ShopTitle"
-	ShopTitle.Parent = ShopFrame
-end
-ShopTitle.Size = UDim2.new(1, 0, 0.15, 0)
-ShopTitle.Position = UDim2.new(0.5, 0, -0.015, 0)
-ShopTitle.AnchorPoint = Vector2.new(0.5, 1)
-ShopTitle.BackgroundTransparency = 1
-ShopTitle.Text = "Shop!"
-ShopTitle.TextScaled = true
-ShopTitle.Font = TITLE_FONT
-ShopTitle.TextColor3 = THEME.Text
-ShopTitle.TextStrokeTransparency = 1
 do
+	local ShopTitle = ShopFrame:FindFirstChild("ShopTitle")
+	if not ShopTitle then
+		ShopTitle = Instance.new("TextLabel")
+		ShopTitle.Name = "ShopTitle"
+		ShopTitle.Parent = ShopFrame
+	end
+	ShopTitle.Size = UDim2.new(1, 0, 0.15, 0)
+	ShopTitle.Position = UDim2.new(0.5, 0, -0.015, 0)
+	ShopTitle.AnchorPoint = Vector2.new(0.5, 1)
+	ShopTitle.BackgroundTransparency = 1
+	ShopTitle.Text = "Shop!"
+	ShopTitle.TextScaled = true
+	ShopTitle.Font = TITLE_FONT
+	ShopTitle.TextColor3 = THEME.Text
+	ShopTitle.TextStrokeTransparency = 1
+
 	local st = ShopTitle:FindFirstChildOfClass("UIStroke")
 	if not st then
 		st = Instance.new("UIStroke")
@@ -711,13 +744,7 @@ if not AdminButton then
 	AdminButton.Name = "AdminButton"
 	AdminButton.Parent = ScreenGui
 end
-AdminButton.Size = ToggleButton.Size
-AdminButton.Position = UDim2.new(
-	ToggleButton.Position.X.Scale,
-	ToggleButton.Position.X.Offset,
-	ToggleButton.Position.Y.Scale - 0.17,
-	ToggleButton.Position.Y.Offset
-)
+PlaceHudButton(AdminButton, 2)
 AdminButton.Text = "Admin"
 AdminButton.TextScaled = true
 AdminButton.Font = TITLE_FONT
@@ -736,8 +763,30 @@ if not AdminFrame then
 	AdminFrame.Parent = ScreenGui
 end
 AdminFrame.Visible = false
+--[[
+	Sized in scale so it fits any window, with a floor in pixels so it cannot
+	collapse on a small one.
+
+	Everything inside the panel is positioned as a fraction of the panel, so
+	the whole thing shrinks together. On a small window that took the greeting
+	card down to about 84x32 and the status line to 10px, which is where the
+	squashed, overlapping look in the screenshots came from: the layout was not
+	wrong so much as scaled below the size its text could survive.
+
+	A UISizeConstraint holds it at a readable minimum and lets it grow from
+	there. The panel is centred, so on a window narrower than the minimum it
+	overhangs evenly rather than pinning to a corner.
+--]]
 AdminFrame.Size = UDim2.new(0.72, 0, 0.68, 0)
 AdminFrame.Position = UDim2.new(0.5, 0, 0.5, 0)
+do
+	local minSize = AdminFrame:FindFirstChildOfClass("UISizeConstraint")
+	if not minSize then
+		minSize = Instance.new("UISizeConstraint")
+		minSize.Parent = AdminFrame
+	end
+	minSize.MinSize = Vector2.new(720, 400)
+end
 AdminFrame.AnchorPoint = Vector2.new(0.5, 0.5)
 AdminFrame.BackgroundColor3 = THEME.PanelBackground
 AdminFrame.BorderSizePixel = 0
@@ -801,13 +850,27 @@ StyleBorder(AdminClose, THEME.ShopOutline, 3)
 	header always looks finished.
 --]]
 
+--[[
+	Where the greeting's text column starts, as a fraction of the card width.
+
+	The headshot is a circle sized off the card height, so how far across it
+	reaches depends on the card's aspect ratio. Working that out here once, from
+	the same numbers the widgets use, is what stops the picture and the "Hello,"
+	label sliding into each other when either is adjusted.
+
+	    card      0.245 wide x 0.185 tall  of a 922 x 490 panel  = 226 x 91
+	    headshot  0.72 of the height       = 65px, starting 0.05 * 226 = 11px
+	    so it ends at 76px, which is 0.34 of the card
+--]]
+local GREET_TEXT_X = 0.40
+
 local Greet = AdminFrame:FindFirstChild("Greet")
 if not Greet then
 	Greet = Instance.new("Frame")
 	Greet.Name = "Greet"
 	Greet.Parent = AdminFrame
 end
-Greet.Size = UDim2.new(0.26, 0, 0.20, 0)
+Greet.Size = UDim2.new(0.245, 0, 0.205, 0)
 Greet.Position = UDim2.new(0.022, 0, 0.035, 0)
 Greet.BackgroundColor3 = THEME.CardBackground
 Greet.BorderSizePixel = 0
@@ -821,8 +884,18 @@ if not GreetImage then
 	GreetImage.Name = "Head"
 	GreetImage.Parent = Greet
 end
-GreetImage.Size = UDim2.new(0, 0, 0.76, 0)
-GreetImage.Position = UDim2.new(0.06, 0, 0.5, 0)
+--[[
+	The headshot is square, so its width comes from the card's HEIGHT while its
+	position is a fraction of the card's WIDTH. Those are different numbers, so
+	the picture's right edge has to be worked out rather than guessed: at 0.76
+	of a 98px card it is 74px wide starting 14px in, which ran under text that
+	began at 82px.
+
+	GREET_TEXT_X is derived from the same figures below, so the text column
+	always starts clear of the picture no matter how the card is resized.
+--]]
+GreetImage.Size = UDim2.new(0, 0, 0.72, 0)
+GreetImage.Position = UDim2.new(0.05, 0, 0.5, 0)
 GreetImage.AnchorPoint = Vector2.new(0, 0.5)
 GreetImage.BackgroundColor3 = THEME.InputBackground
 GreetImage.BorderSizePixel = 0
@@ -862,8 +935,8 @@ if not GreetHello then
 	GreetHello.Name = "Hello"
 	GreetHello.Parent = Greet
 end
-GreetHello.Size = UDim2.new(0.62, 0, 0.40, 0)
-GreetHello.Position = UDim2.new(0.34, 0, 0.14, 0)
+GreetHello.Size = UDim2.new(1 - GREET_TEXT_X - 0.04, 0, 0.36, 0)
+GreetHello.Position = UDim2.new(GREET_TEXT_X, 0, 0.16, 0)
 GreetHello.BackgroundTransparency = 1
 GreetHello.Text = "Hello, " .. Player.Name .. "."
 GreetHello.TextScaled = true
@@ -878,8 +951,8 @@ if not GreetRank then
 	GreetRank.Name = "Rank"
 	GreetRank.Parent = Greet
 end
-GreetRank.Size = UDim2.new(0.62, 0, 0.28, 0)
-GreetRank.Position = UDim2.new(0.34, 0, 0.55, 0)
+GreetRank.Size = UDim2.new(1 - GREET_TEXT_X - 0.04, 0, 0.30, 0)
+GreetRank.Position = UDim2.new(GREET_TEXT_X, 0, 0.54, 0)
 GreetRank.BackgroundTransparency = 1
 GreetRank.Text = "Player"
 GreetRank.TextScaled = true
@@ -944,8 +1017,8 @@ if not PageNav then
 	PageNav.Name = "PageNav"
 	PageNav.Parent = AdminFrame
 end
-PageNav.Size = UDim2.new(0.26, 0, 0.62, 0)
-PageNav.Position = UDim2.new(0.022, 0, 0.255, 0)
+PageNav.Size = UDim2.new(0.245, 0, 0.60, 0)
+PageNav.Position = UDim2.new(0.022, 0, 0.275, 0)
 PageNav.BackgroundTransparency = 1
 PageNav.ZIndex = 3
 
@@ -1224,14 +1297,36 @@ end
 
 local HomeBody = MakePageBody("Home")
 
+--[[
+	The Home page is a plain vertical stack, and the bands are written out here
+	rather than scattered across the widgets so the gaps are checkable at a
+	glance and cannot silently close up.
+
+	Each entry is {top, height} as a fraction of the page. They are in order and
+	must not touch: the input sitting on top of the stat cards was exactly this
+	going wrong, with the row heights edited in one place and the offsets in
+	another.
+--]]
+local HOME_BANDS = {
+	Blurb = {0.015, 0.150},
+	Stats = {0.185, 0.230},
+	Input = {0.445, 0.105},
+	Actions = {0.580, 0.170},
+}
+
+local function HomeBand(element, name)
+	local band = HOME_BANDS[name]
+	element.Position = UDim2.new(0, 0, band[1], 0)
+	element.Size = UDim2.new(1, 0, band[2], 0)
+end
+
 local HomeBlurb = HomeBody:FindFirstChild("Blurb")
 if not HomeBlurb then
 	HomeBlurb = Instance.new("TextLabel")
 	HomeBlurb.Name = "Blurb"
 	HomeBlurb.Parent = HomeBody
 end
-HomeBlurb.Size = UDim2.new(1, 0, 0.16, 0)
-HomeBlurb.Position = UDim2.new(0, 0, 0.02, 0)
+HomeBand(HomeBlurb, "Blurb")
 HomeBlurb.BackgroundTransparency = 1
 HomeBlurb.Text = ""
 HomeBlurb.TextScaled = false
@@ -1250,8 +1345,7 @@ if not HomeStats then
 	HomeStats.Name = "Stats"
 	HomeStats.Parent = HomeBody
 end
-HomeStats.Size = UDim2.new(1, 0, 0.20, 0)
-HomeStats.Position = UDim2.new(0, 0, 0.20, 0)
+HomeBand(HomeStats, "Stats")
 HomeStats.BackgroundTransparency = 1
 HomeStats.ZIndex = 4
 
@@ -1328,8 +1422,7 @@ if not HomeActions then
 	HomeActions.Name = "Actions"
 	HomeActions.Parent = HomeBody
 end
-HomeActions.Size = UDim2.new(1, 0, 0.52, 0)
-HomeActions.Position = UDim2.new(0, 0, 0.44, 0)
+HomeBand(HomeActions, "Actions")
 HomeActions.BackgroundTransparency = 1
 HomeActions.ZIndex = 4
 
@@ -1339,9 +1432,23 @@ do
 		actLayout = Instance.new("UIGridLayout")
 		actLayout.Parent = HomeActions
 	end
-	actLayout.CellSize = UDim2.new(0.235, 0, 0.22, 0)
-	actLayout.CellPadding = UDim2.new(0.02, 0, 0.04, 0)
+	--[[
+		Five buttons across one row.
+
+		Four cells of 0.235 plus three gaps of 0.02 comes to exactly 1.000 of
+		the width, which is the boundary case a grid wraps on, so the last
+		button dropped to a second line and the labels squashed. Sizing for
+		five across with the gaps subtracted first leaves the row a little
+		short of full and keeps every caption on one line.
+	--]]
+	local acrossCount = 5
+	local acrossPad = 0.015
+	local acrossCell = (1 - acrossPad * (acrossCount + 1)) / acrossCount
+
+	actLayout.CellSize = UDim2.new(acrossCell, 0, 0.86, 0)
+	actLayout.CellPadding = UDim2.new(acrossPad, 0, 0.08, 0)
 	actLayout.SortOrder = Enum.SortOrder.LayoutOrder
+	actLayout.HorizontalAlignment = Enum.HorizontalAlignment.Center
 end
 
 -- The free text box the announce / time buttons read from.
@@ -1351,8 +1458,7 @@ if not HomeInput then
 	HomeInput.Name = "Input"
 	HomeInput.Parent = HomeBody
 end
-HomeInput.Size = UDim2.new(1, 0, 0.1, 0)
-HomeInput.Position = UDim2.new(0, 0, 0.335, 0)
+HomeBand(HomeInput, "Input")
 HomeInput.Text = ""
 HomeInput.PlaceholderText = "Message, or a number for Set Time.."
 HomeInput.ClearTextOnFocus = false
@@ -1376,7 +1482,7 @@ local PlayersBody = MakePageBody("Players")
 
 local PlayerList = MakeScroller(
 	PlayersBody, "PlayerList",
-	UDim2.new(0.40, 0, 0.86, 0), UDim2.new(0, 0, 0.02, 0)
+	UDim2.new(0.40, 0, 0.96, 0), UDim2.new(0, 0, 0.02, 0)
 )
 
 local PlayerActions = PlayersBody:FindFirstChild("Actions")
@@ -1385,7 +1491,7 @@ if not PlayerActions then
 	PlayerActions.Name = "Actions"
 	PlayerActions.Parent = PlayersBody
 end
-PlayerActions.Size = UDim2.new(0.575, 0, 0.86, 0)
+PlayerActions.Size = UDim2.new(0.575, 0, 0.96, 0)
 PlayerActions.Position = UDim2.new(0.425, 0, 0.02, 0)
 PlayerActions.BackgroundTransparency = 1
 PlayerActions.ZIndex = 4
@@ -1602,7 +1708,7 @@ local ReportsBody = MakePageBody("Reports")
 
 local ReportList = MakeScroller(
 	ReportsBody, "List",
-	UDim2.new(1, 0, 0.86, 0), UDim2.new(0, 0, 0.02, 0)
+	UDim2.new(1, 0, 0.96, 0), UDim2.new(0, 0, 0.02, 0)
 )
 
 local ReportEmpty = ReportsBody:FindFirstChild("Empty")
@@ -1767,7 +1873,7 @@ local StaffBody = MakePageBody("Staff")
 
 local StaffList = MakeScroller(
 	StaffBody, "List",
-	UDim2.new(0.52, 0, 0.86, 0), UDim2.new(0, 0, 0.02, 0)
+	UDim2.new(0.52, 0, 0.96, 0), UDim2.new(0, 0, 0.02, 0)
 )
 
 local StaffSide = StaffBody:FindFirstChild("Side")
@@ -1776,44 +1882,48 @@ if not StaffSide then
 	StaffSide.Name = "Side"
 	StaffSide.Parent = StaffBody
 end
-StaffSide.Size = UDim2.new(0.45, 0, 0.86, 0)
+StaffSide.Size = UDim2.new(0.45, 0, 0.96, 0)
 StaffSide.Position = UDim2.new(0.55, 0, 0.02, 0)
 StaffSide.BackgroundTransparency = 1
 StaffSide.ZIndex = 4
 
-local AddTitle = StaffSide:FindFirstChild("AddTitle")
-if not AddTitle then
-	AddTitle = Instance.new("TextLabel")
-	AddTitle.Name = "AddTitle"
-	AddTitle.Parent = StaffSide
+do
+	local AddTitle = StaffSide:FindFirstChild("AddTitle")
+	if not AddTitle then
+		AddTitle = Instance.new("TextLabel")
+		AddTitle.Name = "AddTitle"
+		AddTitle.Parent = StaffSide
+	end
+	AddTitle.Size = UDim2.new(1, 0, 0.09, 0)
+	AddTitle.BackgroundTransparency = 1
+	AddTitle.Text = "Whitelist by UserId"
+	AddTitle.TextScaled = true
+	AddTitle.Font = TITLE_FONT
+	AddTitle.TextColor3 = THEME.Text
+	AddTitle.TextXAlignment = Enum.TextXAlignment.Left
+	AddTitle.ZIndex = 5
 end
-AddTitle.Size = UDim2.new(1, 0, 0.09, 0)
-AddTitle.BackgroundTransparency = 1
-AddTitle.Text = "Whitelist by UserId"
-AddTitle.TextScaled = true
-AddTitle.Font = TITLE_FONT
-AddTitle.TextColor3 = THEME.Text
-AddTitle.TextXAlignment = Enum.TextXAlignment.Left
-AddTitle.ZIndex = 5
 
-local AddHint = StaffSide:FindFirstChild("AddHint")
-if not AddHint then
-	AddHint = Instance.new("TextLabel")
-	AddHint.Name = "AddHint"
-	AddHint.Parent = StaffSide
+do
+	local AddHint = StaffSide:FindFirstChild("AddHint")
+	if not AddHint then
+		AddHint = Instance.new("TextLabel")
+		AddHint.Name = "AddHint"
+		AddHint.Parent = StaffSide
+	end
+	AddHint.Size = UDim2.new(1, 0, 0.12, 0)
+	AddHint.Position = UDim2.new(0, 0, 0.10, 0)
+	AddHint.BackgroundTransparency = 1
+	AddHint.Text = "The number in their profile URL. Works whether or not they are in the server."
+	AddHint.TextScaled = false
+	AddHint.TextSize = 12
+	AddHint.TextWrapped = true
+	AddHint.Font = BODY_FONT
+	AddHint.TextColor3 = THEME.MutedText
+	AddHint.TextXAlignment = Enum.TextXAlignment.Left
+	AddHint.TextYAlignment = Enum.TextYAlignment.Top
+	AddHint.ZIndex = 5
 end
-AddHint.Size = UDim2.new(1, 0, 0.12, 0)
-AddHint.Position = UDim2.new(0, 0, 0.10, 0)
-AddHint.BackgroundTransparency = 1
-AddHint.Text = "The number in their profile URL. Works whether or not they are in the server."
-AddHint.TextScaled = false
-AddHint.TextSize = 12
-AddHint.TextWrapped = true
-AddHint.Font = BODY_FONT
-AddHint.TextColor3 = THEME.MutedText
-AddHint.TextXAlignment = Enum.TextXAlignment.Left
-AddHint.TextYAlignment = Enum.TextYAlignment.Top
-AddHint.ZIndex = 5
 
 local StaffIdBox = StaffSide:FindFirstChild("IdBox")
 if not StaffIdBox then
@@ -1860,21 +1970,23 @@ local RemoveStaffButton = MakeSmallButton(StaffSide, "RemoveStaff", "Remove from
 RemoveStaffButton.Size = UDim2.new(1, 0, 0.11, 0)
 RemoveStaffButton.Position = UDim2.new(0, 0, 0.63, 0)
 
-local BanTitle = StaffSide:FindFirstChild("BanTitle")
-if not BanTitle then
-	BanTitle = Instance.new("TextLabel")
-	BanTitle.Name = "BanTitle"
-	BanTitle.Parent = StaffSide
+do
+	local BanTitle = StaffSide:FindFirstChild("BanTitle")
+	if not BanTitle then
+		BanTitle = Instance.new("TextLabel")
+		BanTitle.Name = "BanTitle"
+		BanTitle.Parent = StaffSide
+	end
+	BanTitle.Size = UDim2.new(1, 0, 0.08, 0)
+	BanTitle.Position = UDim2.new(0, 0, 0.77, 0)
+	BanTitle.BackgroundTransparency = 1
+	BanTitle.Text = "Bans"
+	BanTitle.TextScaled = true
+	BanTitle.Font = TITLE_FONT
+	BanTitle.TextColor3 = THEME.Text
+	BanTitle.TextXAlignment = Enum.TextXAlignment.Left
+	BanTitle.ZIndex = 5
 end
-BanTitle.Size = UDim2.new(1, 0, 0.08, 0)
-BanTitle.Position = UDim2.new(0, 0, 0.77, 0)
-BanTitle.BackgroundTransparency = 1
-BanTitle.Text = "Bans"
-BanTitle.TextScaled = true
-BanTitle.Font = TITLE_FONT
-BanTitle.TextColor3 = THEME.Text
-BanTitle.TextXAlignment = Enum.TextXAlignment.Left
-BanTitle.ZIndex = 5
 
 local BanList = MakeScroller(
 	StaffSide, "BanList",
@@ -2045,13 +2157,13 @@ local ShopBody = MakePageBody("Shop")
 
 local AdminList = MakeScroller(
 	ShopBody, "AdminList",
-	UDim2.new(0.36, 0, 0.75, 0), UDim2.new(0, 0, 0.02, 0)
+	UDim2.new(0.36, 0, 0.85, 0), UDim2.new(0, 0, 0.02, 0)
 )
 
 local NewButton = MakeSmallButton(ShopBody, "NewPass", "+ New Gamepass",
 	THEME.BuyBackground, THEME.BuyText)
 NewButton.Size = UDim2.new(0.36, 0, 0.1, 0)
-NewButton.Position = UDim2.new(0, 0, 0.79, 0)
+NewButton.Position = UDim2.new(0, 0, 0.89, 0)
 
 local Editor = ShopBody:FindFirstChild("Editor")
 if not Editor then
@@ -2059,7 +2171,7 @@ if not Editor then
 	Editor.Name = "Editor"
 	Editor.Parent = ShopBody
 end
-Editor.Size = UDim2.new(0.60, 0, 0.88, 0)
+Editor.Size = UDim2.new(0.60, 0, 0.97, 0)
 Editor.Position = UDim2.new(0.40, 0, 0.02, 0)
 Editor.BackgroundTransparency = 1
 Editor.ZIndex = 4
@@ -2462,13 +2574,7 @@ if not ReportButton then
 	ReportButton.Name = "ReportButton"
 	ReportButton.Parent = ScreenGui
 end
-ReportButton.Size = ToggleButton.Size
-ReportButton.Position = UDim2.new(
-	ToggleButton.Position.X.Scale,
-	ToggleButton.Position.X.Offset,
-	ToggleButton.Position.Y.Scale - 0.255,
-	ToggleButton.Position.Y.Offset
-)
+PlaceHudButton(ReportButton, 3)
 ReportButton.Text = "Report"
 ReportButton.TextScaled = true
 ReportButton.Font = TITLE_FONT
@@ -2489,6 +2595,16 @@ end
 ReportFrame.Visible = false
 ReportFrame.Size = UDim2.new(0.50, 0, 0.52, 0)
 ReportFrame.Position = UDim2.new(0.5, 0, 0.5, 0)
+do
+	-- Same reasoning as the admin panel: a floor so the reason list and the
+	-- booth list stay readable on a small window.
+	local minSize = ReportFrame:FindFirstChildOfClass("UISizeConstraint")
+	if not minSize then
+		minSize = Instance.new("UISizeConstraint")
+		minSize.Parent = ReportFrame
+	end
+	minSize.MinSize = Vector2.new(520, 320)
+end
 ReportFrame.AnchorPoint = Vector2.new(0.5, 0.5)
 ReportFrame.BackgroundColor3 = THEME.PanelBackground
 ReportFrame.BorderSizePixel = 0
@@ -2497,22 +2613,23 @@ GetOrMakeCorner(ReportFrame, SHOP_CORNER)
 StyleBorder(ReportFrame, THEME.ShopOutline, 4)
 AddSheen(ReportFrame)
 
-local ReportTitle = ReportFrame:FindFirstChild("Title")
-if not ReportTitle then
-	ReportTitle = Instance.new("TextLabel")
-	ReportTitle.Name = "Title"
-	ReportTitle.Parent = ReportFrame
-end
-ReportTitle.Size = UDim2.new(1, 0, 0.15, 0)
-ReportTitle.Position = UDim2.new(0.5, 0, -0.015, 0)
-ReportTitle.AnchorPoint = Vector2.new(0.5, 1)
-ReportTitle.BackgroundTransparency = 1
-ReportTitle.Text = "Report a Booth"
-ReportTitle.TextScaled = true
-ReportTitle.Font = TITLE_FONT
-ReportTitle.TextColor3 = THEME.Text
-ReportTitle.ZIndex = 3
 do
+	local ReportTitle = ReportFrame:FindFirstChild("Title")
+	if not ReportTitle then
+		ReportTitle = Instance.new("TextLabel")
+		ReportTitle.Name = "Title"
+		ReportTitle.Parent = ReportFrame
+	end
+	ReportTitle.Size = UDim2.new(1, 0, 0.15, 0)
+	ReportTitle.Position = UDim2.new(0.5, 0, -0.015, 0)
+	ReportTitle.AnchorPoint = Vector2.new(0.5, 1)
+	ReportTitle.BackgroundTransparency = 1
+	ReportTitle.Text = "Report a Booth"
+	ReportTitle.TextScaled = true
+	ReportTitle.Font = TITLE_FONT
+	ReportTitle.TextColor3 = THEME.Text
+	ReportTitle.ZIndex = 3
+
 	local st = ReportTitle:FindFirstChildOfClass("UIStroke")
 	if not st then
 		st = Instance.new("UIStroke")
@@ -2548,20 +2665,22 @@ local BoothPick = MakeScroller(
 	UDim2.new(0.44, 0, 0.62, 0), UDim2.new(0.035, 0, 0.06, 0)
 )
 
-local BoothPickTitle = ReportFrame:FindFirstChild("PickTitle")
-if not BoothPickTitle then
-	BoothPickTitle = Instance.new("TextLabel")
-	BoothPickTitle.Name = "PickTitle"
-	BoothPickTitle.Parent = ReportFrame
+do
+	local BoothPickTitle = ReportFrame:FindFirstChild("PickTitle")
+	if not BoothPickTitle then
+		BoothPickTitle = Instance.new("TextLabel")
+		BoothPickTitle.Name = "PickTitle"
+		BoothPickTitle.Parent = ReportFrame
+	end
+	BoothPickTitle.Size = UDim2.new(0.44, 0, 0.08, 0)
+	BoothPickTitle.Position = UDim2.new(0.035, 0, 0.70, 0)
+	BoothPickTitle.BackgroundTransparency = 1
+	BoothPickTitle.Text = "Pick a booth"
+	BoothPickTitle.TextScaled = true
+	BoothPickTitle.Font = BODY_FONT
+	BoothPickTitle.TextColor3 = THEME.MutedText
+	BoothPickTitle.ZIndex = 3
 end
-BoothPickTitle.Size = UDim2.new(0.44, 0, 0.08, 0)
-BoothPickTitle.Position = UDim2.new(0.035, 0, 0.70, 0)
-BoothPickTitle.BackgroundTransparency = 1
-BoothPickTitle.Text = "Pick a booth"
-BoothPickTitle.TextScaled = true
-BoothPickTitle.Font = BODY_FONT
-BoothPickTitle.TextColor3 = THEME.MutedText
-BoothPickTitle.ZIndex = 3
 
 -- Why -----------------------------------------------------------------------
 
