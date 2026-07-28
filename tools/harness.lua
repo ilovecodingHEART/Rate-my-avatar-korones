@@ -21,11 +21,28 @@ mock.verbose = false
 
 local H = {mock = mock}
 
+--[[
+	Every body ever passed to spawn().
+
+	The mock has no threads, so a loop that polls for something and wait()s
+	between attempts runs once and gives up, which made those loops look
+	permanently broken. H.rerunSpawned() runs them again after a test has set
+	the world up - the honest substitute for Roblox resuming the thread.
+--]]
+H.spawned = {}
+
+function H.rerunSpawned()
+	for _, fn in ipairs(H.spawned) do
+		pcall(fn)
+	end
+end
+
 -------------------------------------------------------------------------------
 -- Roblox globals
 -------------------------------------------------------------------------------
 
 local scheduled = {}
+
 
 function H.installGlobals()
 	_G.Instance = {
@@ -108,6 +125,21 @@ function H.installGlobals()
 	_G.NumberSequence = {new = function(v) return {Value = v} end}
 	_G.TweenInfo = {new = function(...) return {...} end}
 
+	--[[
+		require() on a ModuleScript returns whatever the module returned. The
+		mock stores that on the instance as _module, so code that requires a
+		module and reads its API can be exercised.
+	--]]
+	_G.require = function(target)
+		if type(target) == "table" then
+			local mod = rawget(target, "_module")
+			if mod ~= nil then
+				return mod
+			end
+		end
+		error("require: nothing to return", 0)
+	end
+
 	_G.typeof = function(v)
 		if type(v) == "table" and rawget(v, "ClassName") then
 			return "Instance"
@@ -130,8 +162,9 @@ function H.installGlobals()
 		H.clock = H.clock + 0.2
 		return H.clock
 	end
-	_G.time = _G.tick
+
 	_G.wait = function(n) return n or 0 end
+	_G.time = _G.tick
 	_G.warn = function(...)
 		if mock.verbose then
 			local bits = {}
@@ -147,6 +180,7 @@ function H.installGlobals()
 	-- inline is scheduled instead and drained by H.drain().
 	_G.spawn = function(fn)
 		scheduled[#scheduled + 1] = fn
+		H.spawned[#H.spawned + 1] = fn
 	end
 	_G.delay = function(_t, fn)
 		scheduled[#scheduled + 1] = fn
@@ -230,6 +264,14 @@ function H.buildPlace()
 	local Http = service("HttpService", "HttpService")
 	Http._handler = nil
 	Http._calls = {}
+	Http._posts = {}
+	Http.PostAsync = function(self, url, body, contentType)
+		self._posts[#self._posts + 1] = {Url = url, Body = body}
+		if self._postFail then
+			error("HTTP 500", 0)
+		end
+		return ""
+	end
 	Http.GetAsync = function(self, url)
 		self._calls[#self._calls + 1] = url
 		if not self._handler then

@@ -1685,7 +1685,7 @@ DOCK.Input.Size = UDim2.new(1, -116, 0, 28)
 DOCK.Input.Position = UDim2.new(0, 104, 0.5, 0)
 DOCK.Input.AnchorPoint = Vector2.new(0, 0.5)
 DOCK.Input.Text = ""
-DOCK.Input.PlaceholderText = "Reason, message, or a number.."
+DOCK.Input.PlaceholderText = "Message"
 DOCK.Input.ClearTextOnFocus = false
 DOCK.Input.Visible = true
 DOCK.Input.ZIndex = 10
@@ -1697,8 +1697,8 @@ StyleInput(DOCK.Input)
 	command that reads it, would just be a box that does nothing.
 --]]
 DOCK.Pages = {
-	Home = "Message / hour",
-	Players = "Reason / value",
+	Home = "Message",
+	Players = "Reason",
 	Trolling = "Value",
 }
 
@@ -2353,8 +2353,8 @@ if not StaffIdBox then
 	StaffIdBox.Name = "IdBox"
 	StaffIdBox.Parent = StaffSide
 end
-StaffIdBox.Size = UDim2.new(1, 0, 0.11, 0)
-StaffIdBox.Position = UDim2.new(0, 0, 0.24, 0)
+StaffIdBox.Size = UDim2.new(0.5, 0, 0.11, 0)
+StaffIdBox.Position = UDim2.new(0.50, 0, 0.24, 0)
 StaffIdBox.Text = ""
 StaffIdBox.PlaceholderText = "UserId, e.g. 49603"
 StaffIdBox.ClearTextOnFocus = false
@@ -2368,8 +2368,8 @@ if not StaffNameBox then
 	StaffNameBox.Name = "NameBox"
 	StaffNameBox.Parent = StaffSide
 end
-StaffNameBox.Size = UDim2.new(1, 0, 0.11, 0)
-StaffNameBox.Position = UDim2.new(0, 0, 0.37, 0)
+StaffNameBox.Size = UDim2.new(0.5, 0, 0.11, 0)
+StaffNameBox.Position = UDim2.new(0.5, 0, 0.37, 0)
 StaffNameBox.Text = ""
 StaffNameBox.PlaceholderText = "Name, for the list only"
 StaffNameBox.ClearTextOnFocus = false
@@ -3253,7 +3253,7 @@ if not ReportNote then
 	ReportNote.Parent = ReportFrame
 end
 ReportNote.Size = UDim2.new(0.46, 0, 0.11, 0)
-ReportNote.Position = UDim2.new(0.505, 0, 0.53, 0)
+ReportNote.Position = UDim2.new(0.74, 0, 0.58, 0)
 ReportNote.Text = ""
 ReportNote.PlaceholderText = "Anything to add? (optional)"
 ReportNote.ClearTextOnFocus = false

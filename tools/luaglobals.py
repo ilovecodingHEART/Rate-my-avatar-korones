@@ -36,7 +36,19 @@ DECL_FUNC = re.compile(r"\blocal\s+function\s+([A-Za-z_][A-Za-z0-9_]*)")
 DECL_VAR = re.compile(r"\blocal\s+([A-Za-z_][A-Za-z0-9_,\s]*?)(?:\s*=|\s*$)", re.M)
 PARAMS = re.compile(r"function\s*(?:[A-Za-z_][A-Za-z0-9_.:]*)?\s*\(([^)]*)\)")
 FORLOOP = re.compile(r"\bfor\s+([A-Za-z_][A-Za-z0-9_,\s]*?)\s+(?:=|in)\b")
-USE = re.compile(r"(?<![.:\w])([A-Za-z_][A-Za-z0-9_]*)\s*[({]")
+#[[
+#   Two shapes, because only catching the first missed a real bug.
+#
+#   USE_CALL   Name(...)  or  Name{...}
+#   USE_INDEX  Name:Method()  or  Name.Field
+#
+#   ServerScriptService was used three times as `ServerScriptService:Find...`
+#   and never declared. It read as a nil global and silently disabled the chat
+#   mute hook and the staff chat tags for weeks, and this tool reported clean
+#   the whole time because the name was never followed by "(".
+#]]
+USE_CALL = re.compile(r"(?<![.:\w])([A-Za-z_][A-Za-z0-9_]*)\s*[({]")
+USE_INDEX = re.compile(r"(?<![.:\w])([A-Za-z_][A-Za-z0-9_]*)\s*[.:][A-Za-z_]")
 
 
 def strip_noise(src):
@@ -63,7 +75,8 @@ def main(path):
             if nm:
                 defined.add(nm)
 
-    unknown = sorted({n for n in USE.findall(src) if n not in defined})
+    used = set(USE_CALL.findall(src)) | set(USE_INDEX.findall(src))
+    unknown = sorted({n for n in used if n not in defined})
 
     if unknown:
         print("%s: %d undeclared name(s) called" % (path, len(unknown)))

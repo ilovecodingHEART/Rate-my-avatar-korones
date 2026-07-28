@@ -32,6 +32,7 @@ local MarketplaceService = game:GetService("MarketplaceService")
 local DataStoreService = game:GetService("DataStoreService")
 local ServerStorage = game:GetService("ServerStorage")
 local HttpService = game:GetService("HttpService")
+local ServerScriptService = game:GetService("ServerScriptService")
 local Lighting = game:GetService("Lighting")
 
 local RemoteEvent = ReplicatedStorage:WaitForChild("RemoteEvent")
@@ -954,6 +955,135 @@ LoadBans()
 -------------------------------------------------------------------------------
 -- Ranks
 -------------------------------------------------------------------------------
+-------------------------------------------------------------------------------
+-- Adonis
+-------------------------------------------------------------------------------
+--[[
+	One staff list, two consumers.
+
+	Adonis is installed alongside this panel with the $ prefix. Its own Ranks
+	config only hard codes the Owner and the Developers, because those are the
+	only ranks that are hard coded here too. Everyone else is whitelisted in
+	game through the Staff page, which lives in a DataStore and changes while
+	the server is running - Adonis cannot read that on its own.
+
+	So a rank change here is pushed into Adonis as well. Without it you get the
+	thing the merge was supposed to avoid: someone made an Admin in the panel
+	who cannot use a single $ command, and a demoted mod who still can.
+
+	The mapping keeps the two ladders lined up:
+
+	    Mod        -> Adonis Moderators   (100)
+	    Admin      -> Adonis Admins       (200)
+	    Developer  -> Adonis HeadAdmins   (300)   hard coded both sides
+	    Owner      -> Adonis Creators     (900)   hard coded both sides
+
+	Everything is wrapped up and retried, because Adonis loads from a remote
+	module and may not be there yet - or at all, if the loader was removed. If
+	it never appears the panel is completely unaffected; only the $ commands
+	are, and the output says so rather than failing silently.
+--]]
+
+local ADONIS_RANK = {}
+ADONIS_RANK[RANK_MOD] = "Moderators"
+ADONIS_RANK[RANK_ADMIN] = "Admins"
+ADONIS_RANK[RANK_DEV] = "HeadAdmins"
+ADONIS_RANK[RANK_OWNER] = "Creators"
+
+local Adonis = nil
+
+-- Declared here, assigned below. The poll loop that uses it is written above
+-- the definition, and a bare name there reads as a nil global rather than the
+-- function.
+local SyncAllAdonisRanks
+
+--[[
+	Adonis publishes its API by parenting an "Adonis_Loader" model with an API
+	ModuleScript, some time after the server starts. Polled rather than waited
+	on so a place without Adonis does not hang this script forever.
+--]]
+spawn(function()
+	for _ = 1, 30 do
+		local loader = ServerScriptService:FindFirstChild("Adonis_Loader")
+			or game:FindFirstChild("Adonis_Loader")
+
+		if loader then
+			local api = loader:FindFirstChild("API", true)
+			if api and api:IsA("ModuleScript") then
+				local ok, res = pcall(require, api)
+				if ok and type(res) == "table" then
+					Adonis = res
+					print("[Admin] Adonis found, staff ranks will be kept in step.")
+					-- Adonis usually finishes loading after this script, so
+					-- the existing whitelist has to be pushed across now.
+					SyncAllAdonisRanks()
+					return
+				end
+			end
+		end
+
+		wait(2)
+	end
+
+	print("[Admin] Adonis not found. The panel works as normal; $ commands will not.")
+end)
+
+--[[
+	Mirrors one person's rank into Adonis.
+
+	Adonis stores admins by "Name:UserId", so the UserId is what actually
+	matters and a rename cannot strip someone's access - same rule the panel
+	uses. Removing first and then adding avoids someone ending up in two ranks
+	at once after a promotion.
+--]]
+local function SyncAdonisRank(userId, rank, name)
+	if not Adonis then
+		return
+	end
+
+	userId = tonumber(userId)
+	if not userId then
+		return
+	end
+
+	local entry = tostring(name or userId) .. ":" .. tostring(userId)
+
+	local ok, err = pcall(function()
+		for _, adonisRank in pairs(ADONIS_RANK) do
+			if Adonis.RemoveAdmin then
+				pcall(Adonis.RemoveAdmin, entry, adonisRank)
+			end
+		end
+
+		local target = ADONIS_RANK[rank]
+		if target and Adonis.MakeAdmin then
+			Adonis.MakeAdmin(entry, target)
+		end
+	end)
+
+	if not ok then
+		warn("[Admin] Could not sync " .. entry .. " to Adonis: " .. tostring(err))
+	end
+end
+
+-- Everyone currently on the whitelist, for when Adonis loads after we do or a
+-- fresh server starts with people already ranked.
+function SyncAllAdonisRanks()
+	if not Adonis then
+		return
+	end
+
+	for userId, holder in pairs(OWNERS) do
+		SyncAdonisRank(userId, RANK_OWNER, holder)
+	end
+	for userId, holder in pairs(DEVELOPERS) do
+		SyncAdonisRank(userId, RANK_DEV, holder)
+	end
+	for userId, row in pairs(Staff) do
+		SyncAdonisRank(userId, row.Rank, row.Name)
+	end
+end
+
 
 local function RankOfUserId(userId)
 	userId = tonumber(userId)
@@ -2519,6 +2649,11 @@ local function SetStaffRank(actor, targetUserId, rank, displayName)
 
 	SaveStaff()
 	ClearRankCache()
+
+	-- Keep the $ commands in step with the panel, or a new Admin cannot use
+	-- any of them and a demoted one still can.
+	SyncAdonisRank(targetUserId, rank, name)
+
 	BroadcastStaff()
 	BroadcastPlayers()
 
@@ -3107,6 +3242,158 @@ end
 -------------------------------------------------------------------------------
 -- Filing a report
 -------------------------------------------------------------------------------
+-------------------------------------------------------------------------------
+-- Report webhook
+-------------------------------------------------------------------------------
+--[[
+	Posts each new report to Discord.
+
+	Rework by Charmander (Spaqkle on Discord).
+
+	The URL is a bearer token: anyone holding it can post anything into that
+	channel, with no authentication. It is read from ServerStorage rather than
+	written here so it does not end up in the place file, in a screenshot, or
+	in this repo - which is public. To set or rotate it:
+
+	    ServerStorage > ReportWebhook (StringValue) > Value
+
+	With nothing set, everything else still works and the queue fills as normal;
+	only the Discord copy is skipped.
+--]]
+
+local WEBHOOK_NAME = "ReportWebhook"
+
+--[[
+	Seeded into ServerStorage on first boot so reports work out of the box.
+
+	Change it there, not here, and rotate it in Discord if it is ever posted
+	anywhere public - this repo included. A webhook URL is a bearer token:
+	anyone holding it can post into that channel with no authentication.
+--]]
+local DEFAULT_WEBHOOK =
+	"https://discord.com/api/webhooks/1531593610922033222/"
+	.. "gvJfCvC-4fpzfc1aFPljpJGJVEH8gWC7IxdwuNOJo6i-JGQ9WoH5oX8Lf-lRXX9JXTND"
+
+-- Made on boot so it is there to paste into, rather than something to remember
+-- to create. Empty means "no Discord copy", which is a valid state.
+do
+	local holder = ServerStorage:FindFirstChild(WEBHOOK_NAME)
+	if not holder then
+		holder = Instance.new("StringValue")
+		holder.Name = WEBHOOK_NAME
+		holder.Value = DEFAULT_WEBHOOK
+		holder.Parent = ServerStorage
+	end
+end
+
+local function WebhookUrl()
+	local holder = ServerStorage:FindFirstChild(WEBHOOK_NAME)
+	if holder and holder:IsA("StringValue") then
+		local url = holder.Value
+		if type(url) == "string" and string.match(url, "^https://") then
+			return url
+		end
+	end
+	return nil
+end
+
+--[[
+	A picture Discord can actually fetch.
+
+	rbxassetid:// is meaningless outside Roblox, so an embed pointed at one
+	renders blank. These go through the same proxy the panel uses for
+	headshots, which returns a real https image.
+--]]
+local function HeadshotUrl(userId)
+	return PROXY_BASE .. "/apisite/thumbnails/v1/users/avatar-headshot?userIds="
+		.. tostring(userId) .. "&size=420x420&format=png"
+end
+
+local function AssetImageUrl(image)
+	if type(image) ~= "string" then
+		return nil
+	end
+	local id = string.match(image, "rbxassetid://(%d+)")
+		or string.match(image, "^%s*(%d+)%s*$")
+	if not id then
+		return nil
+	end
+	return PROXY_BASE .. "/apisite/thumbnails/v1/assets?assetIds="
+		.. id .. "&size=420x420&format=png"
+end
+
+local function BuildReportEmbed(report)
+	local note = report.Note
+	if not note or note == "" then
+		note = "(none)"
+	end
+
+	local text = report.Text
+	if not text or text == "" then
+		text = "(empty)"
+	end
+
+	local embed = {
+		title = "New Booth Report",
+		color = 15158332,
+		thumbnail = {url = HeadshotUrl(report.By)},
+		fields = {
+			{name = "Reason", value = report.Reason, inline = true},
+			{name = "Booth", value = tostring(report.BoothIndex), inline = true},
+			{name = "Reported By", value = report.ByName
+				.. " (" .. tostring(report.By) .. ")", inline = false},
+			{name = "Against", value = report.AgainstName
+				.. " (" .. tostring(report.Against) .. ")", inline = false},
+			{name = "Note", value = note, inline = false},
+			{name = "Booth Text", value = text, inline = false},
+		},
+		footer = {text = "Report ID " .. tostring(report.Id)},
+		timestamp = os.date("!%Y-%m-%dT%H:%M:%SZ", report.Time),
+	}
+
+	local shown = AssetImageUrl(report.Image)
+	if shown then
+		embed.image = {url = shown}
+	end
+
+	return {username = "Booth Reports", embeds = {embed}}
+end
+
+--[[
+	Fire and forget.
+
+	spawn() rather than task.spawn(): this place targets 2021-era Luau and the
+	task library does not exist here, so task.spawn would error on the line
+	that reports the report.
+
+	pcall() because the report is already stored and broadcast by the time this
+	runs. A dead webhook, a rate limit or a Discord outage should cost the
+	notification and nothing else.
+--]]
+local function SendReportWebhook(report)
+	local url = WebhookUrl()
+	if not url then
+		return
+	end
+
+	spawn(function()
+		local ok, encoded = pcall(function()
+			return HttpService:JSONEncode(BuildReportEmbed(report))
+		end)
+		if not ok then
+			warn("[Report] Could not encode the webhook payload: " .. tostring(encoded))
+			return
+		end
+
+		local sent, err = pcall(function()
+			HttpService:PostAsync(url, encoded, Enum.HttpContentType.ApplicationJson)
+		end)
+		if not sent then
+			warn("[Report] Webhook failed: " .. tostring(err))
+		end
+	end)
+end
+
 --[[
 	This is the one admin-adjacent path an ordinary player can take, so it is
 	the one that has to be hardest to abuse:
@@ -3187,7 +3474,7 @@ local function HandleReport(Player, data)
 	LastReport[Player.UserId] = now
 	NextReportId = NextReportId + 1
 
-	Reports[#Reports + 1] = {
+	local report = {
 		Id = NextReportId,
 		BoothIndex = BoothIndex[booth],
 		Against = owner.UserId,
@@ -3201,6 +3488,8 @@ local function HandleReport(Player, data)
 		Image = booth.Display.SurfaceGui.ImageLabel.Image,
 	}
 
+	Reports[#Reports + 1] = report
+
 	SaveReports()
 	BroadcastReports()
 
@@ -3211,6 +3500,9 @@ local function HandleReport(Player, data)
 				.. tostring(BoothIndex[booth]) .. " (" .. reason .. ")")
 		end
 	end
+
+	-- Last, and non-blocking: the report is already safe by this point.
+	SendReportWebhook(report)
 
 	return nil
 end

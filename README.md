@@ -206,6 +206,42 @@ It also writes down the things that catch people out: Discord blocks Roblox
 server IPs so a relay is needed, `PostAsync` yields and must not be called
 inline, and the note is already filtered by the time it reaches you.
 
+## Adonis
+
+Adonis is installed alongside the panel with the `$` prefix (`$kill me`), from
+`Adonis Admin Loader.rbxm`. Its config is kept as plain Lua in `src/adonis/`
+and packed back into the model, the same way the place scripts are.
+
+There is **one** staff list, not two. Adonis's own Ranks file hard codes only
+the Owner and the Developers, because those are the only ranks hard coded on
+this side too. Everyone else is whitelisted in game from the Staff page, which
+lives in a DataStore and changes while the server is running - Adonis cannot
+read that on its own, so a rank change is pushed across as it happens.
+
+| Panel rank | Adonis rank | Level |
+| --- | --- | --- |
+| Owner | Creators | 900 |
+| Developer | HeadAdmins | 300 |
+| Admin | Admins | 200 |
+| Mod | Moderators | 100 |
+
+If Adonis is missing or has not loaded, the panel is unaffected and says so in
+the output; only the `$` commands are lost.
+
+## Report webhook
+
+New reports are posted to Discord. The URL lives in
+`ServerStorage.ReportWebhook`, seeded on first boot, so it can be rotated
+without touching code.
+
+A webhook URL is a bearer token - anyone holding it can post into that channel
+with no authentication. If it is ever committed, screenshotted or pasted
+publicly, delete it in Discord and make a new one.
+
+The post happens last and inside a `pcall`, after the report is stored and
+staff have been told, so a dead webhook costs the notification and nothing
+else. There is a test for exactly that.
+
 ## Avatar images
 
 Headshots come from the thumbnails API. Requesting the site directly from
@@ -228,7 +264,7 @@ a test for each of those cases.
 python3 tools/runtests.py
 ```
 
-382 tests. They run the real `Server.server.lua` and `Client.client.lua`
+402 tests. They run the real `Server.server.lua` and `Client.client.lua`
 against a mock of the Roblox API (`tools/mock_roblox.lua`, `tools/harness.lua`)
 and drive both halves the way a player would, including pressing client buttons
 and checking what the server actually did.

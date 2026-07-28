@@ -548,6 +548,179 @@ test("single line inputs do not wrap, the report note does", function(H)
 end)
 
 -------------------------------------------------------------------------------
+-- Adonis
+-------------------------------------------------------------------------------
+
+test("the panel works with Adonis absent", function(H)
+	--[[
+		Adonis loads from a remote module and may not be installed at all. The
+		panel must not care: a missing Adonis costs the $ commands and nothing
+		else.
+	--]]
+	local owner = H.addPlayer("thugshaker", 49603)
+	H.drain()
+	H.drain(400)
+
+	H.asPlayer(owner, "AdminSetRank", {UserId = 1001, Rank = 1, Name = "alice"})
+	H.drain()
+
+	local alice = H.addPlayer("alice", 1001)
+	H.drain()
+	eq(H.lastSent(alice, "AdminAccess")[4], "Mod", "the promotion still worked")
+	eq(#H.mock.errors, 0, "and nothing errored looking for Adonis")
+end)
+
+test("a rank change is mirrored into Adonis when it is there", function(H)
+	--[[
+		The whole point of the merge: one staff list. Without this a new Admin
+		cannot run a single $ command, and a demoted mod still can.
+	--]]
+	local calls = {}
+	local api = Instance.new("ModuleScript")
+	api.Name = "API"
+	api._module = {
+		MakeAdmin = function(entry, rank)
+			calls[#calls + 1] = {Action = "add", Entry = entry, Rank = rank}
+		end,
+		RemoveAdmin = function(entry, rank)
+			calls[#calls + 1] = {Action = "remove", Entry = entry, Rank = rank}
+		end,
+	}
+
+	local loader = Instance.new("Model")
+	loader.Name = "Adonis_Loader"
+	api.Parent = loader
+	loader.Parent = H.services.ServerScriptService
+
+	-- Roblox would resume the poll loop and it would find the loader; the
+	-- mock has no threads, so the spawned bodies are run again by hand.
+	H.rerunSpawned()
+
+	local owner = H.addPlayer("thugshaker", 49603)
+	H.drain()
+	H.asPlayer(owner, "AdminSetRank", {UserId = 1001, Rank = 2, Name = "alice"})
+	H.drain()
+
+	local added = nil
+    for _, c in ipairs(calls) do
+		if c.Action == "add" and string.find(c.Entry, "1001") then
+			added = c
+		end
+	end
+
+	ok(added ~= nil, "the new admin was pushed to Adonis")
+	if added then
+		eq(added.Rank, "Admins", "into the matching Adonis rank")
+		ok(string.find(added.Entry, "alice") ~= nil, "as Name:UserId")
+	end
+end)
+
+-------------------------------------------------------------------------------
+-- The report webhook
+-------------------------------------------------------------------------------
+
+local function setWebhook(H, url)
+	local holder = H.ServerStorage:FindFirstChild("ReportWebhook")
+	if holder then
+		holder.Value = url
+	end
+	return holder
+end
+
+local function fileReport(H)
+	local alice = H.addPlayer("alice", 1001)
+	local bob = H.addPlayer("bob", 1002)
+	H.drain()
+	H.booths:GetChildren()[1].Display.Attachment.ProximityPrompt.Triggered:Fire(alice)
+	H.asPlayer(bob, "ReportBooth", {Booth = 1, Reason = "Advertising", Note = "look"})
+	H.drain()
+	return alice, bob
+end
+
+test("a report posts to the webhook when one is set", function(H)
+	setWebhook(H, "https://discord.example/api/webhooks/1/abc")
+	fileReport(H)
+
+	eq(#H.Http._posts, 1, "one post went out")
+
+	local body = H.Http._posts[1].Body
+	ok(string.find(body, "New Booth Report") ~= nil, "it is the report embed")
+	ok(string.find(body, "alice") ~= nil, "naming who was reported")
+	ok(string.find(body, "bob") ~= nil, "and who reported them")
+	ok(string.find(body, "Advertising") ~= nil, "with the reason")
+end)
+
+test("nothing is posted when no webhook is configured", function(H)
+	--[[
+		The holder is created empty on boot, so the default state is "no
+		Discord copy". That has to be silent rather than an error, or every
+		place without a webhook set fills the output with warnings.
+	--]]
+	setWebhook(H, "")
+	fileReport(H)
+	eq(#H.Http._posts, 0, "no post attempted")
+end)
+
+test("a junk webhook value is ignored rather than posted to", function(H)
+	setWebhook(H, "not a url")
+	fileReport(H)
+	eq(#H.Http._posts, 0, "refused to post to something that is not https")
+end)
+
+test("a failing webhook does not cost the report", function(H)
+	--[[
+		The whole point of posting last and inside a pcall. Discord being down
+		must not mean the report is lost, because the panel is the system of
+		record and Discord is only a copy.
+	--]]
+	setWebhook(H, "https://discord.example/api/webhooks/1/abc")
+	H.Http._postFail = true
+
+	local mod = H.addPlayer("qzc", 78857)
+	H.drain()
+	fileReport(H)
+
+	H.clearSent()
+	H.asPlayer(mod, "AdminRefresh", "Reports")
+	local queue = H.lastSent(mod, "AdminReports")
+
+	ok(queue ~= nil, "the queue still came through")
+	eq(#queue[2], 1, "and the report is in it despite the webhook erroring")
+end)
+
+test("the booth image is sent as a real url, not an asset id", function(H)
+	--[[
+		rbxassetid:// means nothing to Discord, so an embed pointed at one
+		renders blank. It has to go through the thumbnail proxy.
+	--]]
+	setWebhook(H, "https://discord.example/api/webhooks/1/abc")
+
+	local alice = H.addPlayer("alice", 1001)
+	local bob = H.addPlayer("bob", 1002)
+	H.drain()
+
+	local booth = H.booths:GetChildren()[1]
+	booth.Display.Attachment.ProximityPrompt.Triggered:Fire(alice)
+	booth.Display.SurfaceGui.ImageLabel.Image = "rbxassetid://998877"
+
+	H.asPlayer(bob, "ReportBooth", {Booth = 1, Reason = "Inappropriate image"})
+	H.drain()
+
+	local body = H.Http._posts[1].Body
+	ok(string.find(body, "rbxassetid") == nil, "no raw asset id in the payload")
+	ok(string.find(body, "998877") ~= nil, "the id is still there")
+	ok(string.find(body, "https") ~= nil, "wrapped in a fetchable url")
+end)
+
+test("the webhook holder is created on boot", function(H)
+	local holder = H.ServerStorage:FindFirstChild("ReportWebhook")
+	ok(holder ~= nil, "ServerStorage.ReportWebhook exists")
+	eq(holder.ClassName, "StringValue", "as a StringValue")
+	ok(string.match(holder.Value, "^https://") ~= nil,
+		"seeded with the configured webhook")
+end)
+
+-------------------------------------------------------------------------------
 -- The input dock
 -------------------------------------------------------------------------------
 
