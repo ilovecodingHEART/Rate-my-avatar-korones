@@ -9,7 +9,9 @@ set -euo pipefail
 
 cd "$(dirname "$0")/.."
 
-PLACE="latestratemyavatar.rbxl"
+# The current place. rateav33.rbxl supersedes latestratemyavatar.rbxl and
+# carries the AFK scripts, which this build leaves untouched.
+PLACE="rateav33.rbxl"
 
 echo "== syntax"
 python3 tools/luacheck.py src/*.lua
@@ -47,7 +49,7 @@ WANT = {
     "StarterGui/MainUI/Client": "src/Client.client.lua",
 }
 
-inst, parents, _ = parse("latestratemyavatar.rbxl")
+inst, parents, _ = parse("rateav33.rbxl")
 seen = 0
 for ref, node in inst.items():
     src = node["props"].get("Source")

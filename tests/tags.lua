@@ -121,6 +121,24 @@ test("a demotion takes the label away again", function(H)
 	eq(tagOf(alice), nil, "tag removed on demotion")
 end)
 
+test("the staff tag clears the AFK label", function(H)
+	--[[
+		The place has a separate AFK system that parents its own BillboardGui
+		to the Head at 2.5 studs. Both survive because the names differ, but at
+		the same height they render through each other. This pins the clearance
+		so the two cannot be pushed back on top of one another.
+	--]]
+	local AFK_OFFSET = 2.5
+
+	local owner = H.addPlayer("thugshaker", 49603)
+	H.drain()
+
+	local gui = owner.Character.Head:FindFirstChild("StaffTag")
+	ok(gui ~= nil, "the tag exists")
+	ok(gui.StudsOffset.Y >= AFK_OFFSET + 0.5,
+		"it sits clear of the AFK label at " .. tostring(AFK_OFFSET) .. " studs")
+end)
+
 test("the tag does not draw through walls", function(H)
 	local owner = H.addPlayer("thugshaker", 49603)
 	H.drain()
@@ -422,6 +440,111 @@ test("the client says something different when nothing is claimed", function(H)
 	local status = H.findIn(H.findIn(gui, "ReportFrame"), "Status")
 	ok(string.find(status.Text, "Nobody has claimed") ~= nil,
 		"it says nobody has claimed one")
+end)
+
+-------------------------------------------------------------------------------
+-- The HUD stack
+-------------------------------------------------------------------------------
+
+test("the HUD buttons never overlap each other", function(H)
+	--[[
+		The buttons are sized by scale with a UISizeConstraint floor, and
+		stacked by the drawn height. An earlier attempt used math.max on the
+		UDim2 offset, which ADDS rather than flooring, so each button grew past
+		the gap between them. This checks the real spacing.
+	--]]
+	local admin = H.addPlayer("qzc", 78857)
+	H.drain()
+	H.runClient(admin)
+
+	local gui = H.clientGui
+	local names = {"TextButton", "ShopButton", "AdminButton", "ReportButton"}
+	local seen = {}
+
+	for _, name in ipairs(names) do
+		local b = H.findIn(gui, name)
+		ok(b ~= nil, name .. " exists")
+		if b then
+			seen[#seen + 1] = {Name = name, Y = b.Position.Y.Offset, H = b.Size.Y.Offset}
+		end
+	end
+
+	-- Offsets are negative going up the screen, so sort and compare gaps.
+	table.sort(seen, function(a, b)
+		return a.Y > b.Y
+	end)
+
+	for i = 1, #seen - 1 do
+		local gap = seen[i].Y - seen[i + 1].Y
+		ok(gap > 0, seen[i + 1].Name .. " sits above " .. seen[i].Name)
+	end
+end)
+
+test("opening a window hides the HUD, closing brings it back", function(H)
+	local admin = H.addPlayer("qzc", 78857)
+	H.drain()
+	H.runClient(admin)
+
+	local gui = H.clientGui
+	H.remote.OnClientEvent:Fire("AdminAccess", true, 3, "Developer")
+
+	local adminButton = H.findIn(gui, "AdminButton")
+	local reportButton = H.findIn(gui, "ReportButton")
+	eq(adminButton.Visible, true, "the admin button starts visible")
+
+	-- Opening the panel takes the stack off screen, because below about
+	-- 1024px wide there is simply no room beside the panel for it.
+	adminButton.MouseButton1Click:Fire()
+	H.drain()
+	eq(H.findIn(gui, "AdminFrame").Visible, true, "the panel opened")
+	eq(adminButton.Visible, false, "and the HUD went away")
+	eq(reportButton.Visible, false, "all of it, not just the one pressed")
+
+	H.findIn(gui, "AdminClose").MouseButton1Click:Fire()
+	eq(H.findIn(gui, "AdminFrame").Visible, false, "the panel closed")
+	eq(adminButton.Visible, true, "and the HUD came back")
+	eq(reportButton.Visible, true, "all of it")
+end)
+
+test("the report window hides the HUD too", function(H)
+	local alice = H.addPlayer("alice", 1001)
+	H.drain()
+	H.runClient(alice)
+
+	local gui = H.clientGui
+	local reportButton = H.findIn(gui, "ReportButton")
+
+	reportButton.MouseButton1Click:Fire()
+	H.drain()
+	eq(reportButton.Visible, false, "hidden while the window is up")
+
+	H.findIn(H.findIn(gui, "ReportFrame"), "Close").MouseButton1Click:Fire()
+	eq(reportButton.Visible, true, "back once it is closed")
+end)
+
+test("hiding the HUD does not resurrect the booth toggle", function(H)
+	--[[
+		The booth toggle is only meant to show once a booth is claimed, so
+		restoring the stack must respect that rather than turning everything
+		back on blindly.
+	--]]
+	local alice = H.addPlayer("alice", 1001)
+	H.drain()
+	H.runClient(alice)
+
+	local gui = H.clientGui
+	local toggle = H.findIn(gui, "TextButton")
+	eq(toggle.Visible, false, "no booth, so no toggle")
+
+	H.findIn(gui, "ReportButton").MouseButton1Click:Fire()
+	H.drain()
+	H.findIn(H.findIn(gui, "ReportFrame"), "Close").MouseButton1Click:Fire()
+
+	eq(toggle.Visible, false, "still hidden after the HUD came back")
+
+	-- Claim a booth, and it should appear.
+	H.remote.OnClientEvent:Fire("OpenGui")
+	eq(toggle.Visible, true, "shown once a booth is claimed")
 end)
 
 test("the trolling page exists for an admin", function(H)

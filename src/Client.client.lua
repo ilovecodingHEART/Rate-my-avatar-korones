@@ -332,17 +332,43 @@ local HUD = {
 	MinHeight = 34,
 	-- Pixels, not scale, so the spacing always matches the button height.
 	Pad = 8,
+	-- button -> slot, so the stack can be relaid out and hidden as a group.
+	Placed = {},
 }
 
--- Settled once, before anything is placed, so every button in the stack is
--- measured against the same value rather than against whatever ToggleButton
--- happened to be when that particular line ran.
-ToggleButton.Size = UDim2.new(
-	ToggleButton.Size.X.Scale, math.max(ToggleButton.Size.X.Offset, HUD.MinWidth),
-	ToggleButton.Size.Y.Scale, math.max(ToggleButton.Size.Y.Offset, HUD.MinHeight)
-)
+--[[
+	A minimum size, done correctly.
+
+	The previous attempt wrote
+
+	    math.max(ToggleButton.Size.X.Offset, HUD.MinWidth)
+
+	meaning "at least 104 wide". It is not. A UDim2 axis resolves as
+	scale * parent + offset, so the two are ADDED: a 137px button became
+	137 + 104 = 241px, and every button in the stack grew past the gap between
+	them and past its own column. That is what made the HUD worse rather than
+	better.
+
+	A minimum in a system that adds has to be expressed as pure pixels with no
+	scale at all, which is what UISizeConstraint is for. The button keeps its
+	scale size and the constraint raises it only when the window is small
+	enough to need it.
+--]]
+do
+	local limit = ToggleButton:FindFirstChildOfClass("UISizeConstraint")
+	if not limit then
+		limit = Instance.new("UISizeConstraint")
+		limit.Parent = ToggleButton
+	end
+	limit.MinSize = Vector2.new(HUD.MinWidth, HUD.MinHeight)
+end
+
 HUD.Size = ToggleButton.Size
 HUD.Anchor = ToggleButton.Position
+
+-- Slot 0. The place file already positions it, so it is registered by hand
+-- rather than going through PlaceHudButton.
+HUD.Placed[ToggleButton] = 0
 
 --[[
 	Stacked upwards from the toggle.
@@ -353,10 +379,75 @@ HUD.Anchor = ToggleButton.Position
 	in pixels, so the gap and the height are in the same units and cannot drift
 	apart at any window size.
 --]]
+--[[
+	Below roughly 1024px wide the panel is simply wider than the space beside
+	it, so no amount of repositioning keeps the HUD clear: at 617px the panel
+	starts at x=23 and the buttons already reach x=108. Shrinking the buttons
+	would only trade the overlap for unreadable text.
+
+	So the stack hides while a window is open, which costs nothing - the window
+	it opened is already on screen, with its own close button. This is what the
+	Roblox menus do as well.
+--]]
+--[[
+	Some buttons have their own reason to be hidden - the booth toggle only
+	appears once a booth is claimed, the admin button only for staff. Those
+	rules are remembered here so that restoring the stack cannot turn a button
+	back on that was never supposed to be showing.
+
+	HUD.Allowed[button] == false means "never show this one". Anything not
+	listed is always allowed.
+--]]
+HUD.Allowed = {}
+
+-- Whether a window is currently covering the HUD. Kept so that a permission
+-- change arriving while the panel is open cannot put a button back on screen
+-- underneath it, which is exactly what AdminAccess used to do.
+HUD.Hidden = false
+
+function HUD.Show(visible)
+	HUD.Hidden = not visible
+	for button in pairs(HUD.Placed) do
+		local allowed = HUD.Allowed[button]
+		if allowed == nil then
+			allowed = true
+		end
+		button.Visible = visible and allowed
+	end
+end
+
+-- Re-applies the current rules. Called after anything changes a button's
+-- permission, so the answer always goes through one place.
+function HUD.Refresh()
+	HUD.Show(not HUD.Hidden)
+end
+
 local function PlaceHudButton(button, slot)
+	HUD.Placed[button] = slot
 	button.Size = HUD.Size
 
-	local step = math.max(HUD.MinHeight, HUD.Size.Y.Offset) + HUD.Pad
+	-- Each clone needs its own constraint; they are not inherited by assigning
+	-- Size from another button.
+	local limit = button:FindFirstChildOfClass("UISizeConstraint")
+	if not limit then
+		limit = Instance.new("UISizeConstraint")
+		limit.Parent = button
+	end
+	limit.MinSize = Vector2.new(HUD.MinWidth, HUD.MinHeight)
+
+	--[[
+		Spacing has to clear the button at its LARGEST, and the constraint only
+		makes it bigger. Measuring the scale height against the same screen the
+		button is drawn on is the only way the two agree; using the raw offset
+		ignored the scale part entirely and let them overlap on a tall window.
+	--]]
+	local screenY = ScreenGui.AbsoluteSize.Y
+	if screenY <= 0 then
+		screenY = 720
+	end
+
+	local drawnHeight = math.max(HUD.Size.Y.Scale * screenY + HUD.Size.Y.Offset, HUD.MinHeight)
+	local step = drawnHeight + HUD.Pad
 
 	button.Position = UDim2.new(
 		HUD.Anchor.X.Scale,
@@ -2791,6 +2882,7 @@ local function SetPanelOpen(open)
 	end
 
 	AdminFrame.Visible = open
+	HUD.Show(not open)
 
 	if open then
 		-- Everything is refetched on open, so a panel left shut for an hour
@@ -2829,6 +2921,18 @@ if not ReportButton then
 	ReportButton.Parent = ScreenGui
 end
 PlaceHudButton(ReportButton, 3)
+
+--[[
+	The stacking step is derived from the button's drawn height, which depends
+	on the window, so the whole stack is laid out again whenever that changes.
+	Without this the spacing is only correct at whatever size the player
+	happened to join at.
+--]]
+ScreenGui:GetPropertyChangedSignal("AbsoluteSize"):Connect(function()
+	for button, slot in pairs(HUD.Placed) do
+		PlaceHudButton(button, slot)
+	end
+end)
 ReportButton.Text = "Report"
 ReportButton.TextScaled = true
 ReportButton.Font = TITLE_FONT
@@ -3070,6 +3174,7 @@ end
 
 ReportButton.MouseButton1Click:Connect(function()
 	ReportFrame.Visible = not ReportFrame.Visible
+	HUD.Show(not ReportFrame.Visible)
 	if ReportFrame.Visible then
 		SetReportStatus("")
 		RemoteEvent:FireServer("ReportOpen")
@@ -3078,6 +3183,7 @@ end)
 
 ReportClose.MouseButton1Click:Connect(function()
 	ReportFrame.Visible = false
+	HUD.Show(true)
 end)
 
 SendReport.MouseButton1Click:Connect(function()
@@ -3256,18 +3362,21 @@ RemoteEvent.OnClientEvent:Connect(function(Argument, Argument2, Argument3, Argum
 	end
 
 	if Argument == "Start" then
-		ToggleButton.Visible = false
+		HUD.Allowed[ToggleButton] = false
+		HUD.Refresh()
 		Frame.Visible = false
 		UpdateButtonText()
 
 	elseif Argument == "OpenGui" then
-		ToggleButton.Visible = true
+		HUD.Allowed[ToggleButton] = true
+		HUD.Refresh()
 		Frame.Visible = true
 		UpdateButtonText()
 		SetStatus("Booth claimed.", false)
 
 	elseif Argument == "BoothUnclaimed" then
-		ToggleButton.Visible = false
+		HUD.Allowed[ToggleButton] = false
+		HUD.Refresh()
 		Frame.Visible = false
 		TextBox.Text = ""
 		ImageBox.Text = ""
@@ -3339,7 +3448,8 @@ RemoteEvent.OnClientEvent:Connect(function(Argument, Argument2, Argument3, Argum
 		MyRank = tonumber(Argument3) or 0
 		MyRankName = Argument4 or "Player"
 
-		AdminButton.Visible = IsAdminClient
+		HUD.Allowed[AdminButton] = IsAdminClient
+		HUD.Refresh()
 		SetGreeting(Player.Name, MyRankName, MyRank)
 		BuildNav()
 
@@ -3348,9 +3458,11 @@ RemoteEvent.OnClientEvent:Connect(function(Argument, Argument2, Argument3, Argum
 		end
 
 	elseif Argument == "AdminClose" then
+		HUD.Show(true)
 		-- Sent when someone is demoted while they have the panel open.
 		IsAdminClient = false
 		MyRank = 0
+		HUD.Allowed[AdminButton] = false
 		AdminButton.Visible = false
 		AdminFrame.Visible = false
 
@@ -3607,6 +3719,7 @@ end)
 
 ShopButton.MouseButton1Click:Connect(function()
 	ShopFrame.Visible = not ShopFrame.Visible
+	HUD.Show(not ShopFrame.Visible)
 	if ShopFrame.Visible then
 		RemoteEvent:FireServer("CheckPasses")
 	end
@@ -3614,6 +3727,7 @@ end)
 
 ShopClose.MouseButton1Click:Connect(function()
 	ShopFrame.Visible = false
+	HUD.Show(true)
 end)
 
 ChangeText.MouseButton1Click:Connect(function()
@@ -3791,6 +3905,7 @@ ReportFrame.Visible = false
 Toast.Visible = false
 BoomPanel.Visible = false
 LoadIntoEditor(nil)
+HUD.Allowed[ToggleButton] = false
 ToggleButton.Visible = false
 SetStatus("")
 UpdateButtonText()
@@ -3816,6 +3931,7 @@ RemoteEvent:FireServer("CheckPasses")
 
 local OwnedBooth = Player:FindFirstChild("OwnedBooth")
 if OwnedBooth and OwnedBooth.Value then
+	HUD.Allowed[ToggleButton] = true
 	ToggleButton.Visible = true
 end
 

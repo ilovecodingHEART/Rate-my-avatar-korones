@@ -7,7 +7,7 @@ Original booth system by ywinfe and thugshaker.
 
 ## Where the code lives
 
-The place is `latestratemyavatar.rbxl`. Editing Lua inside a binary `.rbxl` is
+The place is `rateav33.rbxl`. Editing Lua inside a binary `.rbxl` is
 miserable, so the two scripts that matter are also kept as plain files:
 
 | File | Where it goes in the place |
@@ -132,7 +132,8 @@ tellable apart across a room:
 | Mod | blue |
 
 The nametag deliberately does **not** draw through walls, so a busy server does
-not turn into a wall of floating names.
+not turn into a wall of floating names. It sits at 3.4 studs, clear of the AFK
+label the place puts on the Head at 2.5, with a test pinning that gap.
 
 The chat tag needs the default Roblox chat, because that is what exposes a
 server side hook for it. If the place uses a custom chat the nametags still
@@ -199,7 +200,7 @@ a test for each of those cases.
 python3 tools/runtests.py
 ```
 
-270 tests. They run the real `Server.server.lua` and `Client.client.lua`
+291 tests. They run the real `Server.server.lua` and `Client.client.lua`
 against a mock of the Roblox API (`tools/mock_roblox.lua`, `tools/harness.lua`)
 and drive both halves the way a player would, including pressing client buttons
 and checking what the server actually did.
@@ -254,6 +255,6 @@ untouched so nothing else in the place can shift. A no-op edit is byte
 identical chunk for chunk, which is what makes it safe to run on every build.
 
 ```bash
-python3 tools/rbxl_parse.py latestratemyavatar.rbxl /tmp/dump   # read
+python3 tools/rbxl_parse.py rateav33.rbxl /tmp/dump   # read
 ./tools/build.sh                                                # check + write
 ```

@@ -396,8 +396,36 @@ def check(path, verbose=True):
 
     if hud_min_h:
         toggle = place_toggle_size()
-        bh = max(toggle[1] * SCREEN_H, hud_min_h)
-        bw = max(toggle[0] * SCREEN_W, hud_min_w or 0)
+        #[[
+        #   A UDim2 axis is scale * parent + offset - it ADDS - whereas a
+        #   UISizeConstraint MinSize is a true floor.
+        #
+        #   Getting this wrong in both directions is what caused the bug and
+        #   then hid it: the code used math.max on the offset thinking it was a
+        #   floor (it added 104px to every button), and this check modelled it
+        #   as max() too, so the check agreed with the intent instead of the
+        #   code and reported clean while the buttons visibly overlapped.
+        #
+        #   Now: the scale size is what the UDim2 gives, and the constraint
+        #   raises it only if that comes out under the minimum.
+        #]]
+        #[[
+        #   Scoped to PlaceHudButton, not the whole file. A plain
+        #   `"UISizeConstraint" in src` matched the admin panel's own
+        #   constraint hundreds of lines away, so this took the max() branch no
+        #   matter what the HUD code did - and quietly stopped being able to
+        #   detect the exact bug it was added for.
+        #]]
+        hud_fn = re.search(
+            r"local function PlaceHudButton.*?\n(?=\S)", src, re.S)
+        hud_body = hud_fn.group(0) if hud_fn else ""
+        uses_constraint = "UISizeConstraint" in hud_body
+        if uses_constraint:
+            bh = max(toggle[1] * SCREEN_H, hud_min_h)
+            bw = max(toggle[0] * SCREEN_W, hud_min_w or 0)
+        else:
+            bh = toggle[1] * SCREEN_H + hud_min_h
+            bw = toggle[0] * SCREEN_W + (hud_min_w or 0)
 
         #[[
         #   The spacing is read out of PlaceHudButton rather than recomputed
@@ -411,9 +439,9 @@ def check(path, verbose=True):
         if step:
             expr = step.group(1).strip()
             expr = expr.replace("math.max", "max")
+            expr = expr.replace("drawnHeight", repr(bh))
             expr = expr.replace("HUD.MinHeight", repr(hud_min_h))
             expr = expr.replace("HUD.Pad", repr(hud_pad if hud_pad else 0))
-            # ToggleButton's pixel offset after the floor is applied.
             expr = expr.replace("HUD.Size.Y.Offset", repr(bh))
             try:
                 gap_px = float(eval(expr, {"__builtins__": {}}, {"max": max}))
@@ -421,14 +449,21 @@ def check(path, verbose=True):
                 gap_px = None
 
         if gap_px is None:
-            # Could not read it, so fall back to the scale-based form.
             gap_px = (named_number(src, "Gap") or 0) * SCREEN_H
         say("")
         say("  HUD buttons           %4.0f x %-4.0f  spaced %.0fpx apart" % (bw, bh, gap_px))
         if gap_px < bh + 2:
             problems.append(
-                "HUD buttons are %.0fpx tall but only %.0fpx apart, so they overlap"
+                "HUD buttons are %.0fpx tall but stacked only %.0fpx apart, so they overlap"
                 % (bh, gap_px))
+
+        # A HUD button wider than its own column runs into whatever is beside
+        # it. This is a real failure, not a note: it is how the stack ended up
+        # sitting on top of the panel.
+        if bw > 0.24 * SCREEN_W:
+            problems.append(
+                "HUD buttons are %.0fpx wide, which is %.0f%% of a %.0fpx window"
+                % (bw, 100 * bw / SCREEN_W, SCREEN_W))
 
         #[[
         #   The HUD sits on the same screen as the panel, so it can run
@@ -440,9 +475,13 @@ def check(path, verbose=True):
             # Reported, not failed. The HUD position is being handled outside
             # this repo, so flagging it is useful but blocking the build on it
             # would just be noise on every run.
-            notes.append(
-                "HUD buttons reach x=%.0f while the panel starts at x=%.0f"
-                % (toggle_x + bw, fx))
+            # Only worth mentioning if the stack is still on screen while a
+            # window is open. It is not: HUD.Show hides it, so the two can
+            # never actually be drawn on top of each other.
+            if "function HUD.Show" not in src:
+                problems.append(
+                    "HUD buttons reach x=%.0f but the panel starts at x=%.0f"
+                    % (toggle_x + bw, fx))
 
     say("")
     for n in notes:

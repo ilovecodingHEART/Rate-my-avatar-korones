@@ -3615,8 +3615,17 @@ local function ApplyStaffTag(Player)
 		gui.Name = TAG_NAME
 		gui.Parent = head
 	end
+	--[[
+		Sits ABOVE the AFK label rather than on top of it.
+
+		The place has a separate AFK system that parents its own BillboardGui to
+		the Head at 2.5 studs. Different name, so both survive, but at 2.4 they
+		rendered through each other on any staff member who tabbed out. Stacking
+		this one higher keeps both readable, and leaves the AFK label where it
+		already was rather than moving somebody else's UI.
+	--]]
 	gui.Size = UDim2.new(0, 200, 0, 34)
-	gui.StudsOffset = Vector3.new(0, 2.4, 0)
+	gui.StudsOffset = Vector3.new(0, 3.4, 0)
 	gui.AlwaysOnTop = false
 	gui.MaxDistance = 60
 	gui.LightInfluence = 0

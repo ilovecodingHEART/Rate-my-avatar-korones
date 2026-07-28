@@ -185,12 +185,21 @@ def draw(path, page, out_path, screen=None):
                     box(kr, idle, kid, muted, width=2)
 
     # HUD buttons down the left.
-    toggle_size = (0.107, 0, 0.071, 0)
+    # Same maths as PlaceHudButton: scale size raised by the UISizeConstraint,
+    # stacked upward by the drawn height plus the pad.
+    from checklayout import named_number
+    min_w = named_number(src, "MinWidth") or 0
+    min_h = named_number(src, "MinHeight") or 0
+    pad = named_number(src, "Pad") or 0
+
+    bw = max(0.107 * SCREEN_W, min_w)
+    bh = max(0.071 * SCREEN_H, min_h)
+    step = bh + pad
+    bx = 0.007 * SCREEN_W
+    base = 0.550 * SCREEN_H
+
     for i, cap in enumerate(("Booth Menu", "Shop", "Admin", "Report")):
-        bw = toggle_size[0] * SCREEN_W
-        bh = toggle_size[2] * SCREEN_H
-        bx = 0.007 * SCREEN_W
-        by = (0.550 - 0.085 * i) * SCREEN_H
+        by = base - step * i
         box((bx, by, bw, bh), bg)
         d.text((bx + 8, by + bh / 2 - 6), cap, fill=text)
 
