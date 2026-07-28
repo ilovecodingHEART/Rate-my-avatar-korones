@@ -3,14 +3,15 @@
 
 	Original booth system by ywinfe and thugshaker.
 
-	This script drives the existing menu (TextBox / ChangeText / UnclaimBooth),
-	adds the image-ID controls, and applies a dark theme to every element in
-	MainUI at run time, so nothing has to be recoloured by hand in Studio.
+	Builds the booth menu, the shop, and applies the dark theme at run time by
+	cloning the widgets already in MainUI, so nothing has to be styled by hand.
 
-	Created at run time inside MainUI.Frame:
-	    ImageBox      TextBox     "Enter Image / Decal ID.."
-	    ChangeImage   TextButton  "Set Image"
-	    Status        TextLabel   feedback line
+	Created at run time inside MainUI:
+	    Frame.ImageBox      TextBox     image / decal ID
+	    Frame.ChangeImage   TextButton  "Set Image" / "Unlock Image Uploads"
+	    Frame.Status        TextLabel   feedback line
+	    ShopButton          TextButton  opens the shop
+	    ShopFrame           Frame       one row per gamepass, shows "Owned"
 
 	Written for Roblox/Luau 2021 and earlier.
 --]]
@@ -50,10 +51,13 @@ local THEME = {
 	DangerStroke = Color3.fromRGB(120, 62, 66),
 	DangerText = Color3.fromRGB(255, 138, 138),
 
-	-- "Unlock" state for the locked image button.
 	LockedBackground = Color3.fromRGB(42, 34, 16),
 	LockedStroke = Color3.fromRGB(150, 118, 44),
 	LockedText = Color3.fromRGB(255, 214, 122),
+
+	OwnedBackground = Color3.fromRGB(18, 34, 22),
+	OwnedStroke = Color3.fromRGB(62, 122, 74),
+	OwnedText = Color3.fromRGB(130, 235, 155),
 
 	Text = Color3.fromRGB(236, 238, 242),
 	MutedText = Color3.fromRGB(150, 156, 166),
@@ -65,13 +69,9 @@ local THEME = {
 
 local PANEL_CORNER = UDim.new(0, 14)
 local CONTROL_CORNER = UDim.new(0, 8)
+local STATUS_TIME = 4
+local PASS_WORD = "Gamepass"
 
-local STATUS_TIME = 4 -- seconds a status message stays on screen
-
--- Row heights (scale of the Frame) so all seven rows fit inside it.
--- Heights + padding + UIPadding must stay under 1.0, because the Frame has
--- ClipsDescendants on and would otherwise cut off the last row.
---   0.835 rows + 6 * 0.016 padding + 0.04 UIPadding = 0.971
 local LAYOUT = {
 	{Name = "TextLabel", Order = 1, Height = 0.130, Width = 1.00},
 	{Name = "TextBox", Order = 2, Height = 0.150, Width = 0.888},
@@ -96,7 +96,6 @@ local function GetOrMakeCorner(Element, Radius)
 	return Corner
 end
 
--- UIStroke parented to a Frame / TextButton / TextBox draws the border.
 local function StyleBorder(Element, Color, Thickness)
 	local Stroke = Element:FindFirstChildOfClass("UIStroke")
 	if not Stroke then
@@ -110,8 +109,6 @@ local function StyleBorder(Element, Color, Thickness)
 	return Stroke
 end
 
--- UIStroke parented to a TextLabel outlines the glyphs; keep it dark and faint
--- so light text stays readable without a hard black halo.
 local function StyleTextStroke(Label)
 	local Stroke = Label:FindFirstChildOfClass("UIStroke")
 	if Stroke then
@@ -121,10 +118,18 @@ local function StyleTextStroke(Label)
 	end
 end
 
+local function SetCaption(Element, Caption)
+	local Label = Element:FindFirstChild("TextLabel")
+	if Label and Label:IsA("TextLabel") then
+		Label.Text = Caption
+	else
+		Element.Text = Caption
+	end
+end
+
 local function StyleCaption(Element, Color)
 	Element.TextColor3 = Color
 	Element.TextStrokeTransparency = 1
-
 	local Label = Element:FindFirstChild("TextLabel")
 	if Label and Label:IsA("TextLabel") then
 		Label.BackgroundTransparency = 1
@@ -155,12 +160,10 @@ local function StyleInput(Box)
 	StyleBorder(Box, THEME.InputStroke, 2)
 end
 
--- Faint top-down sheen, like the reference panel.
 local function AddSheen(Element)
 	if Element:FindFirstChildOfClass("UIGradient") then
 		return
 	end
-
 	local Gradient = Instance.new("UIGradient")
 	Gradient.Rotation = 90
 	Gradient.Color = ColorSequence.new({
@@ -171,28 +174,20 @@ local function AddSheen(Element)
 end
 
 -------------------------------------------------------------------------------
--- Building the new widgets
+-- Booth menu widgets
 -------------------------------------------------------------------------------
 
--- A cloned TextButton keeps its UICorner / UIStroke / UIListLayout / TextLabel.
-local function CloneButton(Name, Caption)
-	local Existing = Frame:FindFirstChild(Name)
+local function CloneButton(Name, Caption, parent)
+	parent = parent or Frame
+	local Existing = parent:FindFirstChild(Name)
 	if Existing then
 		return Existing
 	end
-
 	local Button = ChangeText:Clone()
 	Button.Name = Name
 	Button.Visible = true
-
-	local Label = Button:FindFirstChild("TextLabel")
-	if Label then
-		Label.Text = Caption
-	else
-		Button.Text = Caption
-	end
-
-	Button.Parent = Frame
+	SetCaption(Button, Caption)
+	Button.Parent = parent
 	return Button
 end
 
@@ -201,7 +196,6 @@ local function CloneTextBox(Name, Placeholder)
 	if Existing then
 		return Existing
 	end
-
 	local Box = TextBox:Clone()
 	Box.Name = Name
 	Box.Text = ""
@@ -212,12 +206,11 @@ local function CloneTextBox(Name, Placeholder)
 	return Box
 end
 
-local function BuildStatus()
-	local Existing = Frame:FindFirstChild("Status")
+local function CloneLabel(Name, parent)
+	local Existing = parent:FindFirstChild(Name)
 	if Existing then
 		return Existing
 	end
-
 	local Label
 	if Title then
 		Label = Title:Clone()
@@ -225,24 +218,18 @@ local function BuildStatus()
 		Label = Instance.new("TextLabel")
 		Label.TextScaled = true
 	end
-
-	Label.Name = "Status"
+	Label.Name = Name
 	Label.Text = ""
 	Label.BackgroundTransparency = 1
 	Label.Visible = true
-	Label.Parent = Frame
+	Label.Parent = parent
 	return Label
 end
 
 local ImageBox = CloneTextBox("ImageBox", "Enter Image / Decal ID..")
 local ChangeImage = CloneButton("ChangeImage", "Set Image")
-local Status = BuildStatus()
+local Status = CloneLabel("Status", Frame)
 
--------------------------------------------------------------------------------
--- Apply the dark theme
--------------------------------------------------------------------------------
-
--- Main panel: near-black, rounded, thin grey outline.
 Frame.BackgroundColor3 = THEME.PanelBackground
 Frame.BackgroundTransparency = 0
 Frame.BorderSizePixel = 0
@@ -259,12 +246,9 @@ end
 
 StyleInput(TextBox)
 StyleInput(ImageBox)
-
 StyleButton(ChangeText, THEME.ButtonBackground, THEME.ButtonStroke, THEME.Text)
 StyleButton(ChangeImage, THEME.ButtonBackground, THEME.ButtonStroke, THEME.Text)
 StyleButton(UnclaimBooth, THEME.DangerBackground, THEME.DangerStroke, THEME.DangerText)
-
--- Floating open/close button, same panel styling.
 StyleButton(ToggleButton, THEME.PanelBackground, THEME.PanelStroke, THEME.Text)
 GetOrMakeCorner(ToggleButton, CONTROL_CORNER)
 AddSheen(ToggleButton)
@@ -273,7 +257,6 @@ Status.TextColor3 = THEME.MutedText
 Status.TextStrokeTransparency = 1
 StyleTextStroke(Status)
 
--- Row sizes and vertical order.
 for _, Row in ipairs(LAYOUT) do
 	local Element = Frame:FindFirstChild(Row.Name)
 	if Element then
@@ -299,35 +282,174 @@ Padding.PaddingTop = UDim.new(0.02, 0)
 Padding.PaddingBottom = UDim.new(0.02, 0)
 
 -------------------------------------------------------------------------------
--- Paywall state
+-- Shop
 -------------------------------------------------------------------------------
 
--- Assume locked until the server says otherwise, so the unlock prompt is never
--- skipped by a client that missed the first message.
-local Paywall = {Enabled = true, Owns = false, Name = "required item"}
+local ShopButton = ScreenGui:FindFirstChild("ShopButton")
+if not ShopButton then
+	ShopButton = ToggleButton:Clone()
+	ShopButton.Name = "ShopButton"
+	ShopButton.Parent = ScreenGui
+end
+ShopButton.Visible = true
+ShopButton.Size = ToggleButton.Size
+ShopButton.Position = UDim2.new(
+	ToggleButton.Position.X.Scale,
+	ToggleButton.Position.X.Offset,
+	ToggleButton.Position.Y.Scale - 0.085,
+	ToggleButton.Position.Y.Offset
+)
+SetCaption(ShopButton, "Shop")
+StyleButton(ShopButton, THEME.PanelBackground, THEME.PanelStroke, THEME.Text)
+GetOrMakeCorner(ShopButton, CONTROL_CORNER)
+AddSheen(ShopButton)
 
-local function SetButtonCaption(Button, Caption)
-	local Label = Button:FindFirstChild("TextLabel")
-	if Label then
-		Label.Text = Caption
-	else
-		Button.Text = Caption
+local ShopFrame = ScreenGui:FindFirstChild("ShopFrame")
+if not ShopFrame then
+	ShopFrame = Frame:Clone()
+	ShopFrame.Name = "ShopFrame"
+	-- Start clean: the booth widgets are not wanted in here.
+	for _, c in ipairs(ShopFrame:GetChildren()) do
+		if c:IsA("GuiObject") then
+			c:Destroy()
+		end
 	end
+	ShopFrame.Parent = ScreenGui
 end
 
-local function ApplyPaywallState()
-	local Locked = Paywall.Enabled and not Paywall.Owns
+ShopFrame.Visible = false
+ShopFrame.Size = UDim2.new(0.42, 0, 0.46, 0)
+ShopFrame.Position = UDim2.new(0.5, 0, 0.5, 0)
+ShopFrame.AnchorPoint = Vector2.new(0.5, 0.5)
+ShopFrame.BackgroundColor3 = THEME.PanelBackground
+ShopFrame.BackgroundTransparency = 0
+ShopFrame.BorderSizePixel = 0
+GetOrMakeCorner(ShopFrame, PANEL_CORNER)
+StyleBorder(ShopFrame, THEME.PanelStroke, 3)
+AddSheen(ShopFrame)
 
-	if Locked then
-		SetButtonCaption(ChangeImage, "Unlock Image Uploads")
-		StyleButton(ChangeImage, THEME.LockedBackground, THEME.LockedStroke, THEME.LockedText)
-		ImageBox.PlaceholderText = "Requires " .. tostring(Paywall.Name) .. ".."
-		ImageBox.TextEditable = false
-	else
-		SetButtonCaption(ChangeImage, "Set Image")
+local shopRatio = ShopFrame:FindFirstChildOfClass("UIAspectRatioConstraint")
+if shopRatio then
+	shopRatio:Destroy()
+end
+
+local shopList = ShopFrame:FindFirstChildOfClass("UIListLayout")
+if not shopList then
+	shopList = Instance.new("UIListLayout")
+	shopList.Parent = ShopFrame
+end
+shopList.SortOrder = Enum.SortOrder.LayoutOrder
+shopList.Padding = UDim.new(0.02, 0)
+shopList.HorizontalAlignment = Enum.HorizontalAlignment.Center
+shopList.VerticalAlignment = Enum.VerticalAlignment.Top
+
+local shopPad = ShopFrame:FindFirstChildOfClass("UIPadding")
+if not shopPad then
+	shopPad = Instance.new("UIPadding")
+	shopPad.Parent = ShopFrame
+end
+shopPad.PaddingTop = UDim.new(0.03, 0)
+shopPad.PaddingBottom = UDim.new(0.03, 0)
+
+local ShopTitle = CloneLabel("ShopTitle", ShopFrame)
+ShopTitle.Text = "Shop"
+ShopTitle.LayoutOrder = 0
+ShopTitle.Size = UDim2.new(1, 0, 0.14, 0)
+ShopTitle.TextColor3 = THEME.Text
+StyleTextStroke(ShopTitle)
+
+local ShopClose = CloneButton("ShopClose", "Close", ShopFrame)
+ShopClose.LayoutOrder = 999
+ShopClose.Size = UDim2.new(0.34, 0, 0.11, 0)
+StyleButton(ShopClose, THEME.ButtonBackground, THEME.ButtonStroke, THEME.Text)
+
+-- Key -> its buy button, so state updates are cheap.
+local ShopRows = {}
+
+local function BuildShopRow(entry, order)
+	local rowName = "Row_" .. entry.Key
+	local row = ShopFrame:FindFirstChild(rowName)
+	if not row then
+		row = Instance.new("Frame")
+		row.Name = rowName
+		row.BackgroundTransparency = 1
+		row.Parent = ShopFrame
+	end
+	row.LayoutOrder = order
+	row.Size = UDim2.new(0.94, 0, 0.20, 0)
+
+	local rl = row:FindFirstChildOfClass("UIListLayout")
+	if not rl then
+		rl = Instance.new("UIListLayout")
+		rl.Parent = row
+	end
+	rl.SortOrder = Enum.SortOrder.LayoutOrder
+	rl.Padding = UDim.new(0.02, 0)
+	rl.HorizontalAlignment = Enum.HorizontalAlignment.Center
+	rl.VerticalAlignment = Enum.VerticalAlignment.Top
+
+	local name = CloneLabel("Name", row)
+	name.LayoutOrder = 1
+	name.Size = UDim2.new(1, 0, 0.36, 0)
+	name.Text = entry.Title
+	name.TextColor3 = THEME.Text
+	StyleTextStroke(name)
+
+	local blurb = CloneLabel("Blurb", row)
+	blurb.LayoutOrder = 2
+	blurb.Size = UDim2.new(1, 0, 0.26, 0)
+	blurb.Text = entry.Blurb or ""
+	blurb.TextColor3 = THEME.MutedText
+	StyleTextStroke(blurb)
+
+	local buy = row:FindFirstChild("Buy")
+	if not buy then
+		buy = ChangeText:Clone()
+		buy.Name = "Buy"
+		buy.Parent = row
+		buy.MouseButton1Click:Connect(function()
+			RemoteEvent:FireServer("PromptPurchase", entry.Key)
+		end)
+	end
+	buy.LayoutOrder = 3
+	buy.Size = UDim2.new(0.55, 0, 0.34, 0)
+	buy.Visible = true
+
+	ShopRows[entry.Key] = buy
+	return row
+end
+
+-------------------------------------------------------------------------------
+-- Pass state
+-------------------------------------------------------------------------------
+
+local Passes = {}
+
+local function ApplyPassState()
+	local ownsUpload = Passes.UPLOAD == true
+
+	if ownsUpload then
+		SetCaption(ChangeImage, "Set Image")
 		StyleButton(ChangeImage, THEME.ButtonBackground, THEME.ButtonStroke, THEME.Text)
 		ImageBox.PlaceholderText = "Enter Image / Decal ID.."
 		ImageBox.TextEditable = true
+	else
+		SetCaption(ChangeImage, "Unlock Image Uploads")
+		StyleButton(ChangeImage, THEME.LockedBackground, THEME.LockedStroke, THEME.LockedText)
+		ImageBox.PlaceholderText = "Requires " .. PASS_WORD .. ".."
+		ImageBox.TextEditable = false
+	end
+
+	for key, buy in pairs(ShopRows) do
+		if Passes[key] then
+			SetCaption(buy, "Owned")
+			StyleButton(buy, THEME.OwnedBackground, THEME.OwnedStroke, THEME.OwnedText)
+			buy.AutoButtonColor = false
+		else
+			SetCaption(buy, "Buy")
+			StyleButton(buy, THEME.ButtonBackground, THEME.ButtonStroke, THEME.Text)
+			buy.AutoButtonColor = true
+		end
 	end
 end
 
@@ -364,19 +486,13 @@ end
 -------------------------------------------------------------------------------
 
 local function UpdateButtonText()
-	local Label = ToggleButton:FindFirstChild("TextLabel")
 	local Caption
 	if Frame.Visible then
 		Caption = "Close Booth Menu"
 	else
 		Caption = "Open Booth Menu"
 	end
-
-	if Label then
-		Label.Text = Caption
-	else
-		ToggleButton.Text = Caption
-	end
+	SetCaption(ToggleButton, Caption)
 end
 
 local function SetPromptsEnabled(Enabled)
@@ -389,7 +505,6 @@ local function SetPromptsEnabled(Enabled)
 				local Prompt = Attachment:FindFirstChild("ProximityPrompt")
 				if Prompt then
 					if Enabled then
-						-- Only re-enable prompts on booths nobody owns.
 						Prompt.Enabled = (Owner == nil) or (Owner.Value == nil)
 					else
 						Prompt.Enabled = false
@@ -434,18 +549,17 @@ RemoteEvent.OnClientEvent:Connect(function(Argument, Argument2)
 	elseif Argument == "EnablePrompts" then
 		SetPromptsEnabled(true)
 
-	elseif Argument == "PaywallState" then
+	elseif Argument == "PassState" then
 		if type(Argument2) == "table" then
-			Paywall.Enabled = (Argument2.Enabled ~= false)
-			Paywall.Owns = (Argument2.Owns == true)
-			if Argument2.Name then
-				Paywall.Name = Argument2.Name
+			for i, entry in ipairs(Argument2) do
+				Passes[entry.Key] = entry.Owns
+				BuildShopRow(entry, i)
 			end
-			ApplyPaywallState()
+			ApplyPassState()
 		end
 
 	elseif Argument == "ImageChanged" then
-		SetStatus("Image updated.", false)
+		SetStatus(Argument2 or "Image updated.", false)
 
 	elseif Argument == "ImageError" then
 		SetStatus(Argument2 or "That image ID did not work.", true)
@@ -467,18 +581,26 @@ ToggleButton.MouseButton1Click:Connect(function()
 	UpdateButtonText()
 end)
 
+ShopButton.MouseButton1Click:Connect(function()
+	ShopFrame.Visible = not ShopFrame.Visible
+	if ShopFrame.Visible then
+		RemoteEvent:FireServer("CheckPasses")
+	end
+end)
+
+ShopClose.MouseButton1Click:Connect(function()
+	ShopFrame.Visible = false
+end)
+
 ChangeText.MouseButton1Click:Connect(function()
-	local Text = TextBox.Text
-	if string.match(Text, "^%s*$") then
+	if string.match(TextBox.Text, "^%s*$") then
 		SetStatus("Type some booth text first.", true)
 		return
 	end
-
-	RemoteEvent:FireServer("ChangeText", Text)
+	RemoteEvent:FireServer("ChangeText", TextBox.Text)
 	SetStatus("Sending text..")
 end)
 
--- Accepts a bare ID, an rbxassetid:// string, or a link containing "?id=".
 local function ReadImageId(Input)
 	return string.match(Input, "^%s*(%d+)%s*$")
 		or string.match(Input, "^%s*rbxassetid://(%d+)%s*$")
@@ -486,10 +608,10 @@ local function ReadImageId(Input)
 end
 
 local function SubmitImage()
-	-- While locked, the button opens the store instead of sending an ID.
-	if Paywall.Enabled and not Paywall.Owns then
-		RemoteEvent:FireServer("PromptPurchase")
-		SetStatus("Opening the store..")
+	if not Passes.UPLOAD then
+		ShopFrame.Visible = true
+		RemoteEvent:FireServer("CheckPasses")
+		SetStatus("Image uploads need the " .. PASS_WORD .. ".", true)
 		return
 	end
 
@@ -528,16 +650,14 @@ end)
 -------------------------------------------------------------------------------
 
 Frame.Visible = false
+ShopFrame.Visible = false
 ToggleButton.Visible = false
 SetStatus("")
 UpdateButtonText()
-ApplyPaywallState()
+ApplyPassState()
 
--- Ask again in case this LocalScript loaded after the server's first message
--- (respawn with ResetOnSpawn, or a slow first join).
-RemoteEvent:FireServer("CheckPaywall")
+RemoteEvent:FireServer("CheckPasses")
 
--- Booths this client already owns (rejoin / respawn with ResetOnSpawn on).
 local OwnedBooth = Player:FindFirstChild("OwnedBooth")
 if OwnedBooth and OwnedBooth.Value then
 	ToggleButton.Visible = true

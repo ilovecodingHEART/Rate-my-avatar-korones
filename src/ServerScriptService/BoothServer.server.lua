@@ -2,14 +2,19 @@
 	Booth server script  (ServerScriptService)
 
 	Original booth system by ywinfe and thugshaker.
-	Image-ID integration.
 
 	Written for Roblox/Luau 2021 and earlier:
 	  * no task.*, no attributes, no string interpolation
 	  * only wait(), tick(), pcall(), type()
 
-	No HttpService is used. A claimed booth starts on the placeholder image and
-	the owner sets their own picture with an image / decal ID.
+	Gamepasses (all Pekora catalog assets, bought with PromptPurchase):
+	  UPLOAD      set the image on the booth you claimed
+	  BOOMBOX     grants a working boombox tool
+	  PERMANENT   your image STAYS on that booth after you leave
+
+	Permanent images are saved per booth (by index) in a DataStore, so they
+	survive unclaim, disconnect and server restarts. The next player to claim
+	that booth inherits the image, and can only replace it if they own UPLOAD.
 
 	Requirements:
 	  * ReplicatedStorage.RemoteEvent
@@ -24,6 +29,8 @@ local Workspace = game:GetService("Workspace")
 local Players = game:GetService("Players")
 local TextService = game:GetService("TextService")
 local MarketplaceService = game:GetService("MarketplaceService")
+local DataStoreService = game:GetService("DataStoreService")
+local ServerStorage = game:GetService("ServerStorage")
 
 local RemoteEvent = ReplicatedStorage:WaitForChild("RemoteEvent")
 local Booths = Workspace:WaitForChild("Booths")
@@ -32,57 +39,88 @@ local Booths = Workspace:WaitForChild("Booths")
 -- Configuration
 -------------------------------------------------------------------------------
 
-local DEFAULT_IMAGE = "rbxasset://textures/ui/GuiImagePlaceholder.png"
+-- Shown on unclaimed booths and on any booth with no saved image.
+local DEFAULT_IMAGE = "rbxassetid://821176"
 
 local FILTER_TEXT = true -- set false if FilterStringAsync is unavailable
 local MAX_TEXT_LENGTH = 120
 local ACTION_COOLDOWN = 1 -- seconds between remote actions per player
 
+local USE_DATASTORE = true -- false = permanent images last only this server
+local DATASTORE_NAME = "BoothImages_v1"
+local SAVE_RETRIES = 3
+
 -------------------------------------------------------------------------------
--- Paywall
+-- Gamepasses
 -------------------------------------------------------------------------------
 --[[
-	Setting a custom booth image is locked behind an item the player has to own.
+	On Pekora, real game passes do not work, so passes are sold as catalog
+	shirts. Every entry here is therefore an ASSET:
 
-	PAYWALL_ID is taken from the item's URL:
+	    ownership -> MarketplaceService:PlayerOwnsAsset(Player, Id)
+	    purchase  -> MarketplaceService:PromptPurchase(Player, Id)
+	    finished  -> MarketplaceService.PromptPurchaseFinished
+
+	IsGamePass is left in only in case Pekora ever fixes real passes; keep it
+	false for /catalog/ links. Ids come straight from the URL:
 	    https://www.pekora.zip/catalog/356360/Thugshaker-fan-shirt
 	                                    ^^^^^^
-
-	PAYWALL_IS_GAMEPASS decides which API is used, and the two are NOT
-	interchangeable. Pekora's "/catalog/" pages are ordinary assets (shirts,
-	t-shirts, gear), so this must stay false for the link above:
-
-	    false -> MarketplaceService:PlayerOwnsAsset(Player, Id)
-	             MarketplaceService:PromptPurchase(Player, Id)
-	             MarketplaceService.PromptPurchaseFinished
-
-	    true  -> MarketplaceService:UserOwnsGamePassAsync(Player.UserId, Id)
-	             MarketplaceService:PromptGamePassPurchase(Player, Id)
-	             MarketplaceService.PromptGamePassPurchaseFinished
-
-	A real game pass lives on a "/game-pass/" URL. If you switch to one, put its
-	pass ID here and set PAYWALL_IS_GAMEPASS to true.
 --]]
 
-local PAYWALL_ENABLED = true
-local PAYWALL_ID = 356360
-local PAYWALL_IS_GAMEPASS = false
-local PAYWALL_NAME = "Thugshaker fan shirt"
+local PASSES = {
+	UPLOAD = {
+		Id = 356360,
+		IsGamePass = false,
+		Title = "Image Upload Gamepass",
+		Blurb = "Put your own image on the booth you claim.",
+	},
+	BOOMBOX = {
+		Id = 353454,
+		IsGamePass = false,
+		Title = "Boombox Gamepass",
+		Blurb = "Carry a boombox and play any audio ID.",
+	},
+	PERMANENT = {
+		Id = 353447,
+		IsGamePass = false,
+		Title = "Permanent Image Gamepass",
+		Blurb = "Your image stays on the booth after you leave.",
+	},
+}
 
--- Ownership answers are cached so a player spamming the button cannot spam the
--- web API. A successful purchase clears the entry immediately.
+-- Order the shop lists them in.
+local SHOP_ORDER = {"UPLOAD", "PERMANENT", "BOOMBOX"}
+
+-- Player-facing wording never names the shirts.
+local PASS_WORD = "Gamepass"
+
 local OWNERSHIP_CACHE_SECONDS = 30
 
 -------------------------------------------------------------------------------
 -- State
 -------------------------------------------------------------------------------
 
-local LastAction = {} -- [Player] = tick() of the last accepted remote call
-local LastCheck = {} -- [Player] = tick() of the last paywall refresh request
-local OwnsPaywall = {} -- [Player] = {Owns = boolean, Time = number}
+local LastAction = {} -- [Player]           = tick() of last accepted action
+local LastCheck = {} -- [Player]           = tick() of last passive refresh
+local Ownership = {} -- [Player][Key]      = {Owns = bool, Time = number}
+local BoothIndex = {} -- [Booth]            = stable number
+local BoothImage = {} -- [Booth]            = saved image string or nil
+local BoothDirty = {} -- [Booth]            = true when it needs saving
+
+local ImageStore = nil
+if USE_DATASTORE then
+	local ok, res = pcall(function()
+		return DataStoreService:GetDataStore(DATASTORE_NAME)
+	end)
+	if ok then
+		ImageStore = res
+	else
+		warn("[Booth] DataStore unavailable, permanent images will not persist: " .. tostring(res))
+	end
+end
 
 -------------------------------------------------------------------------------
--- Helpers
+-- Booth helpers
 -------------------------------------------------------------------------------
 
 local function IsBooth(Booth)
@@ -114,23 +152,191 @@ local function GetPrompt(Booth)
 	return Booth.Display.Attachment.ProximityPrompt
 end
 
-local function GetNameLabel(Booth)
+local function SetNamePlate(Booth, Text)
 	local Part = Booth:FindFirstChild("PartNamePlayer")
 	if not Part then
-		return nil
+		return
 	end
 	local SurfaceGui = Part:FindFirstChild("SurfaceGui")
 	if not SurfaceGui then
-		return nil
+		return
 	end
-	return SurfaceGui:FindFirstChild("TextLabel")
-end
-
-local function SetNamePlate(Booth, Text)
-	local Label = GetNameLabel(Booth)
+	local Label = SurfaceGui:FindFirstChild("TextLabel")
 	if Label then
 		Label.Text = Text
 	end
+end
+
+-- Whatever this booth should be showing right now.
+local function CurrentImage(Booth)
+	return BoothImage[Booth] or DEFAULT_IMAGE
+end
+
+local function ApplyImage(Booth)
+	Booth.Display.SurfaceGui.ImageLabel.Image = CurrentImage(Booth)
+end
+
+-------------------------------------------------------------------------------
+-- Saving permanent images
+-------------------------------------------------------------------------------
+
+local function KeyFor(Booth)
+	return "booth_" .. tostring(BoothIndex[Booth] or 0)
+end
+
+local function LoadBoothImage(Booth)
+	if not ImageStore then
+		return
+	end
+
+	local ok, res = pcall(function()
+		return ImageStore:GetAsync(KeyFor(Booth))
+	end)
+
+	if ok and type(res) == "string" and res ~= "" then
+		BoothImage[Booth] = res
+	elseif not ok then
+		warn("[Booth] Could not load image for " .. KeyFor(Booth) .. ": " .. tostring(res))
+	end
+end
+
+local function SaveBoothImage(Booth)
+	if not ImageStore then
+		BoothDirty[Booth] = nil
+		return
+	end
+
+	local key = KeyFor(Booth)
+	local value = BoothImage[Booth]
+
+	for attempt = 1, SAVE_RETRIES do
+		local ok, err = pcall(function()
+			ImageStore:SetAsync(key, value)
+		end)
+		if ok then
+			BoothDirty[Booth] = nil
+			return true
+		end
+		if attempt == SAVE_RETRIES then
+			warn("[Booth] Could not save " .. key .. ": " .. tostring(err))
+		else
+			wait(2)
+		end
+	end
+	return false
+end
+
+-------------------------------------------------------------------------------
+-- Ownership
+-------------------------------------------------------------------------------
+
+local function DoOwnershipCheck(Player, Pass)
+	local Owns = false
+
+	local Success, Result = pcall(function()
+		if Pass.IsGamePass then
+			return MarketplaceService:UserOwnsGamePassAsync(Player.UserId, Pass.Id)
+		end
+		-- PlayerOwnsAsset takes the Player object, not the UserId.
+		return MarketplaceService:PlayerOwnsAsset(Player, Pass.Id)
+	end)
+
+	if Success then
+		Owns = (Result == true)
+	else
+		-- Fail closed: never hand out a perk because the API broke.
+		warn("[Booth] Ownership check failed for " .. Player.Name .. ": " .. tostring(Result))
+	end
+
+	return Owns
+end
+
+local function PlayerOwns(Player, Key, UseCache)
+	local Pass = PASSES[Key]
+	if not Pass then
+		return false
+	end
+
+	local byPlayer = Ownership[Player]
+	if not byPlayer then
+		byPlayer = {}
+		Ownership[Player] = byPlayer
+	end
+
+	if UseCache ~= false then
+		local Cached = byPlayer[Key]
+		if Cached and (tick() - Cached.Time) < OWNERSHIP_CACHE_SECONDS then
+			return Cached.Owns
+		end
+	end
+
+	local Owns = DoOwnershipCheck(Player, Pass)
+
+	if Player.Parent ~= nil then
+		byPlayer[Key] = {Owns = Owns, Time = tick()}
+	end
+	return Owns
+end
+
+-- One payload the client uses for both the booth UI and the shop.
+local function PushPassState(Player, UseCache)
+	local state = {}
+	for _, Key in ipairs(SHOP_ORDER) do
+		local Pass = PASSES[Key]
+		state[#state + 1] = {
+			Key = Key,
+			Id = Pass.Id,
+			Title = Pass.Title,
+			Blurb = Pass.Blurb,
+			Owns = PlayerOwns(Player, Key, UseCache),
+		}
+	end
+
+	if Player.Parent ~= nil then
+		RemoteEvent:FireClient(Player, "PassState", state)
+	end
+	return state
+end
+
+-------------------------------------------------------------------------------
+-- Boombox
+-------------------------------------------------------------------------------
+
+local function FindBoomboxTemplate()
+	local direct = ServerStorage:FindFirstChild("Boombox")
+	if direct and direct:IsA("Tool") then
+		return direct
+	end
+	for _, d in ipairs(ServerStorage:GetDescendants()) do
+		if d:IsA("Tool") and d.Name == "Boombox" then
+			return d
+		end
+	end
+	return nil
+end
+
+local function GiveBoombox(Player)
+	if not PlayerOwns(Player, "BOOMBOX", true) then
+		return false
+	end
+
+	local template = FindBoomboxTemplate()
+	if not template then
+		warn("[Booth] No Boombox tool found in ServerStorage.")
+		return false
+	end
+
+	local backpack = Player:FindFirstChildOfClass("Backpack")
+	if backpack and not backpack:FindFirstChild("Boombox") then
+		template:Clone().Parent = backpack
+	end
+
+	local gear = Player:FindFirstChild("StarterGear")
+	if gear and not gear:FindFirstChild("Boombox") then
+		template:Clone().Parent = gear
+	end
+
+	return true
 end
 
 -------------------------------------------------------------------------------
@@ -149,7 +355,6 @@ local function MakeImageContent(ImageId)
 		return nil
 	end
 
-	-- Accept a bare ID, "rbxassetid://123" or a link containing "?id=123".
 	local Digits = string.match(ImageId, "^%s*(%d+)%s*$")
 		or string.match(ImageId, "^%s*rbxassetid://(%d+)%s*$")
 		or string.match(ImageId, "[?&]id=(%d+)")
@@ -159,73 +364,6 @@ local function MakeImageContent(ImageId)
 	end
 
 	return "rbxassetid://" .. Digits
-end
-
--------------------------------------------------------------------------------
--- Paywall checks
--------------------------------------------------------------------------------
-
--- Yields. Returns true / false, and never errors: if the web call fails we
--- deny access rather than handing out the perk for free.
-local function DoOwnershipCheck(Player)
-	local Owns = false
-
-	local Success, Result = pcall(function()
-		if PAYWALL_IS_GAMEPASS then
-			return MarketplaceService:UserOwnsGamePassAsync(Player.UserId, PAYWALL_ID)
-		end
-		-- PlayerOwnsAsset takes the Player object, not the UserId.
-		return MarketplaceService:PlayerOwnsAsset(Player, PAYWALL_ID)
-	end)
-
-	if Success then
-		Owns = (Result == true)
-	else
-		warn("Booth paywall check failed for " .. Player.Name .. ": " .. tostring(Result))
-	end
-
-	return Owns
-end
-
-local function PlayerOwnsPaywall(Player, UseCache)
-	if not PAYWALL_ENABLED then
-		return true
-	end
-
-	if UseCache ~= false then
-		local Cached = OwnsPaywall[Player]
-		if Cached and (tick() - Cached.Time) < OWNERSHIP_CACHE_SECONDS then
-			return Cached.Owns
-		end
-	end
-
-	local Owns = DoOwnershipCheck(Player)
-
-	-- The player may have left while the call was yielding.
-	if Player.Parent == nil then
-		return Owns
-	end
-
-	OwnsPaywall[Player] = {Owns = Owns, Time = tick()}
-	return Owns
-end
-
--- Tells the client whether to show "Set Image" or "Unlock Image Uploads".
-local function PushPaywallState(Player, Owns)
-	RemoteEvent:FireClient(Player, "PaywallState", {
-		Enabled = PAYWALL_ENABLED,
-		Owns = Owns,
-		Name = PAYWALL_NAME,
-		Id = PAYWALL_ID,
-	})
-end
-
-local function RefreshPaywallState(Player, UseCache)
-	local Owns = PlayerOwnsPaywall(Player, UseCache)
-	if Player.Parent ~= nil then
-		PushPaywallState(Player, Owns)
-	end
-	return Owns
 end
 
 local function CheckCooldown(Player)
@@ -239,9 +377,11 @@ local function CheckCooldown(Player)
 end
 
 -------------------------------------------------------------------------------
--- Booth claiming / resetting
+-- Claiming
 -------------------------------------------------------------------------------
 
+-- Unclaiming must NOT wipe the image: a permanent image belongs to the booth,
+-- not to whoever happens to be standing in it.
 local function ResetBooth(Player, Booth)
 	if not Booth or not IsBooth(Booth) then
 		if Player then
@@ -254,7 +394,7 @@ local function ResetBooth(Player, Booth)
 		return
 	end
 
-	Booth.Display.SurfaceGui.ImageLabel.Image = DEFAULT_IMAGE
+	ApplyImage(Booth)
 	Booth.Display.SurfaceGui.TextLabel.Text = "Unclaimed Booth"
 	Booth.Display.BoothOwner.Value = nil
 	SetNamePlate(Booth, "None")
@@ -275,8 +415,6 @@ end
 local function ClaimBooth(Player, Booth)
 	local OwnedBooth = Player:FindFirstChild("OwnedBooth")
 
-	-- Server-side checks stop one player claiming multiple booths and stop
-	-- two players claiming the same booth at nearly the same time.
 	if not OwnedBooth or OwnedBooth.Value then
 		return
 	end
@@ -290,29 +428,33 @@ local function ClaimBooth(Player, Booth)
 
 	Booth.Display.BoothOwner.Value = Player
 	Booth.Display.SurfaceGui.TextLabel.Text = Player.Name .. "'s Booth"
-	Booth.Display.SurfaceGui.ImageLabel.Image = DEFAULT_IMAGE
 	SetNamePlate(Booth, Player.Name)
 	OwnedBooth.Value = Booth
+
+	-- Inherit whatever image is already on this booth.
+	ApplyImage(Booth)
 
 	RemoteEvent:FireClient(Player, "DisablePrompts")
 	RemoteEvent:FireClient(Player, "OpenGui")
 end
 
-local function SetupBooth(Booth)
+local function SetupBooth(Booth, index)
 	if not IsBooth(Booth) then
 		return
 	end
+
+	BoothIndex[Booth] = index
 
 	GetPrompt(Booth).Triggered:Connect(function(Player)
 		ClaimBooth(Player, Booth)
 	end)
 
-	-- Start every booth in a clean state.
 	Booth.Display.BoothOwner.Value = nil
-	Booth.Display.SurfaceGui.ImageLabel.Image = DEFAULT_IMAGE
 	Booth.Display.SurfaceGui.TextLabel.Text = "Unclaimed Booth"
 	SetNamePlate(Booth, "None")
 	GetPrompt(Booth).Enabled = true
+	GetPrompt(Booth).ObjectText = "Claim Booth"
+	ApplyImage(Booth)
 end
 
 -------------------------------------------------------------------------------
@@ -341,13 +483,12 @@ local function HandleChangeText(Player, Booth, Text)
 		if Success and type(Filtered) == "string" then
 			FinalText = Filtered
 		else
-			warn("Text filtering failed: " .. tostring(ErrorMessage))
+			warn("[Booth] Text filtering failed: " .. tostring(ErrorMessage))
 			RemoteEvent:FireClient(Player, "TextError", "Text filter is unavailable, try again.")
 			return
 		end
 	end
 
-	-- The player may have unclaimed while the filter call was yielding.
 	if not IsBooth(Booth) or Booth.Display.BoothOwner.Value ~= Player then
 		return
 	end
@@ -363,47 +504,34 @@ local function HandleChangeImage(Player, Booth, ImageId)
 		return
 	end
 
-	-- The paywall is enforced HERE, on the server. Hiding the button on the
-	-- client is only cosmetic; an exploiter can always fire the remote.
-	if not PlayerOwnsPaywall(Player, true) then
-		PushPaywallState(Player, false)
-		RemoteEvent:FireClient(Player, "ImageError",
-			"Custom images need the " .. PAYWALL_NAME .. ".")
+	-- Enforced on the server. Hiding the button client-side is only cosmetic.
+	if not PlayerOwns(Player, "UPLOAD", true) then
+		PushPassState(Player, true)
+		RemoteEvent:FireClient(Player, "ImageError", "Custom images need the " .. PASS_WORD .. ".")
 		return
 	end
 
-	-- Re-validate: the player may have unclaimed while the check was yielding.
 	if not IsBooth(Booth) or Booth.Display.BoothOwner.Value ~= Player then
 		return
 	end
 
-	Booth.Display.SurfaceGui.ImageLabel.Image = ImageContent
-	RemoteEvent:FireClient(Player, "ImageChanged")
-end
+	local Permanent = PlayerOwns(Player, "PERMANENT", true)
 
-local function HandlePromptPurchase(Player)
-	if not PAYWALL_ENABLED then
+	if not IsBooth(Booth) or Booth.Display.BoothOwner.Value ~= Player then
 		return
 	end
 
-	-- Do not prompt someone who already owns it.
-	if PlayerOwnsPaywall(Player, true) then
-		PushPaywallState(Player, true)
-		RemoteEvent:FireClient(Player, "ImageChanged")
-		return
-	end
-
-	local Success, Result = pcall(function()
-		if PAYWALL_IS_GAMEPASS then
-			MarketplaceService:PromptGamePassPurchase(Player, PAYWALL_ID)
-		else
-			MarketplaceService:PromptPurchase(Player, PAYWALL_ID)
-		end
-	end)
-
-	if not Success then
-		warn("Could not open the purchase prompt: " .. tostring(Result))
-		RemoteEvent:FireClient(Player, "ImageError", "Could not open the store page.")
+	if Permanent then
+		BoothImage[Booth] = ImageContent
+		BoothDirty[Booth] = true
+		Booth.Display.SurfaceGui.ImageLabel.Image = ImageContent
+		SaveBoothImage(Booth)
+		RemoteEvent:FireClient(Player, "ImageChanged", "Image set. It will stay on this booth.")
+	else
+		-- No PERMANENT pass: show it now, but do not overwrite the saved one.
+		Booth.Display.SurfaceGui.ImageLabel.Image = ImageContent
+		RemoteEvent:FireClient(Player, "ImageChanged", "Image set for now. Buy the "
+			.. PASS_WORD .. " to make it stay.")
 	end
 end
 
@@ -412,21 +540,37 @@ RemoteEvent.OnServerEvent:Connect(function(Player, Argument, Argument2)
 		return
 	end
 
-	-- These two do not need a booth, so they are handled before the ownership
-	-- test below (a player can buy the item before claiming anything).
 	if Argument == "PromptPurchase" then
-		if CheckCooldown(Player) then
-			HandlePromptPurchase(Player)
+		if not CheckCooldown(Player) then
+			return
+		end
+		local Pass = PASSES[Argument2]
+		if not Pass then
+			return
+		end
+		if PlayerOwns(Player, Argument2, true) then
+			PushPassState(Player, true)
+			return
+		end
+		local ok, err = pcall(function()
+			if Pass.IsGamePass then
+				MarketplaceService:PromptGamePassPurchase(Player, Pass.Id)
+			else
+				MarketplaceService:PromptPurchase(Player, Pass.Id)
+			end
+		end)
+		if not ok then
+			warn("[Booth] Purchase prompt failed: " .. tostring(err))
+			RemoteEvent:FireClient(Player, "ImageError", "Could not open the store page.")
 		end
 		return
-	elseif Argument == "CheckPaywall" then
-		-- Kept on its own throttle: this is a passive UI sync fired on join, so
-		-- it must not eat the player's first real action from the cooldown.
+
+	elseif Argument == "CheckPasses" then
 		local Now = tick()
 		local Last = LastCheck[Player]
 		if not Last or (Now - Last) >= ACTION_COOLDOWN then
 			LastCheck[Player] = Now
-			RefreshPaywallState(Player, true)
+			PushPassState(Player, true)
 		end
 		return
 	end
@@ -437,7 +581,6 @@ RemoteEvent.OnServerEvent:Connect(function(Player, Argument, Argument2)
 		Booth = OwnedBooth.Value
 	end
 
-	-- Ignore edit requests from players who do not own a booth.
 	if not Booth or not IsBooth(Booth) or Booth.Display.BoothOwner.Value ~= Player then
 		return
 	end
@@ -470,9 +613,13 @@ local function PlayerAdded(Player)
 	end
 
 	RemoteEvent:FireClient(Player, "Start")
+	PushPassState(Player, false)
 
-	-- Tell the client up front whether image uploads are unlocked.
-	RefreshPaywallState(Player, false)
+	GiveBoombox(Player)
+	Player.CharacterAdded:Connect(function()
+		wait(1)
+		GiveBoombox(Player)
+	end)
 end
 
 local function PlayerRemoving(Player)
@@ -481,7 +628,6 @@ local function PlayerRemoving(Player)
 		ResetBooth(nil, OwnedBooth.Value)
 	end
 
-	-- Safety net: release any booth still pointing at this player.
 	for _, Booth in pairs(Booths:GetChildren()) do
 		if IsBooth(Booth) and Booth.Display.BoothOwner.Value == Player then
 			ResetBooth(nil, Booth)
@@ -490,45 +636,79 @@ local function PlayerRemoving(Player)
 
 	LastAction[Player] = nil
 	LastCheck[Player] = nil
-	OwnsPaywall[Player] = nil
+	Ownership[Player] = nil
 end
 
 -------------------------------------------------------------------------------
 -- Purchase completion
 -------------------------------------------------------------------------------
 
--- Assets and game passes fire two different events, so only connect the one
--- that matches PAYWALL_IS_GAMEPASS.
+local ById = {}
+for Key, Pass in pairs(PASSES) do
+	ById[Pass.Id] = Key
+end
+
 local function OnPurchaseFinished(Player, Id, WasPurchased)
 	if not WasPurchased then
-		return
-	end
-	if tonumber(Id) ~= PAYWALL_ID then
 		return
 	end
 	if typeof(Player) ~= "Instance" or not Player:IsA("Player") then
 		return
 	end
 
-	-- Drop the cached "does not own" answer, then re-check against the API.
-	OwnsPaywall[Player] = nil
-	RefreshPaywallState(Player, false)
-end
+	local Key = ById[tonumber(Id)]
+	if not Key then
+		return
+	end
 
-if PAYWALL_ENABLED then
-	if PAYWALL_IS_GAMEPASS then
-		MarketplaceService.PromptGamePassPurchaseFinished:Connect(OnPurchaseFinished)
-	else
-		MarketplaceService.PromptPurchaseFinished:Connect(OnPurchaseFinished)
+	-- Drop only that item's cached answer, then re-check it for real.
+	local byPlayer = Ownership[Player]
+	if byPlayer then
+		byPlayer[Key] = nil
+	end
+
+	PushPassState(Player, false)
+
+	if Key == "BOOMBOX" then
+		GiveBoombox(Player)
 	end
 end
 
-for _, Booth in pairs(Booths:GetChildren()) do
-	SetupBooth(Booth)
+MarketplaceService.PromptPurchaseFinished:Connect(OnPurchaseFinished)
+MarketplaceService.PromptGamePassPurchaseFinished:Connect(OnPurchaseFinished)
+
+-------------------------------------------------------------------------------
+-- Start up
+-------------------------------------------------------------------------------
+
+local ordered = Booths:GetChildren()
+table.sort(ordered, function(a, b)
+	local ap, bp = a:FindFirstChild("Display"), b:FindFirstChild("Display")
+	if ap and bp then
+		if math.abs(ap.Position.X - bp.Position.X) > 0.01 then
+			return ap.Position.X < bp.Position.X
+		end
+		return ap.Position.Z < bp.Position.Z
+	end
+	return a.Name < b.Name
+end)
+
+for index, Booth in ipairs(ordered) do
+	if IsBooth(Booth) then
+		BoothIndex[Booth] = index
+		LoadBoothImage(Booth)
+		SetupBooth(Booth, index)
+	end
 end
+
 Booths.ChildAdded:Connect(function(Booth)
-	wait() -- let the booth's children replicate before wiring it up
-	SetupBooth(Booth)
+	wait()
+	if IsBooth(Booth) then
+		local n = #Booths:GetChildren()
+		BoothIndex[Booth] = n
+		LoadBoothImage(Booth)
+		SetupBooth(Booth, n)
+	end
 end)
 
 for _, Player in ipairs(Players:GetPlayers()) do
@@ -537,5 +717,13 @@ end
 
 Players.PlayerAdded:Connect(PlayerAdded)
 Players.PlayerRemoving:Connect(PlayerRemoving)
+
+game:BindToClose(function()
+	for Booth, dirty in pairs(BoothDirty) do
+		if dirty then
+			SaveBoothImage(Booth)
+		end
+	end
+end)
 
 -- Original booth system by ywinfe and thugshaker

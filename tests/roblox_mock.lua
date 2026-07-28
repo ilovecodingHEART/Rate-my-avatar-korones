@@ -18,6 +18,7 @@ local function newSignal()
 end
 M.newSignal = newSignal
 
+local new
 -- Instance -------------------------------------------------------------------
 local Instance_mt = {}
 Instance_mt.__newindex = function(t, k, v)
@@ -43,6 +44,29 @@ function Instance_mt.FindFirstChild(self, n)
   return nil
 end
 function Instance_mt.IsA(self, c) return rawget(self,"ClassName") == c end
+function Instance_mt.Clone(self)
+  local c = new(rawget(self,"ClassName"), rawget(self,"Name"), nil)
+  for k,v in pairs(self) do
+    if k~="_kids" and k~="Parent" then rawset(c,k,v) end
+  end
+  for _,kid in ipairs(rawget(self,"_kids") or {}) do
+    local kc = Instance_mt.Clone(kid); kc.Parent = c
+  end
+  return c
+end
+function Instance_mt.FindFirstChildOfClass(self, cls)
+  for _, c in ipairs(rawget(self,"_kids") or {}) do
+    if rawget(c,"ClassName") == cls then return c end
+  end
+  return nil
+end
+function Instance_mt.GetDescendants(self)
+  local out = {}
+  local function rec(x)
+    for _, c in ipairs(rawget(x,"_kids") or {}) do out[#out+1] = c; rec(c) end
+  end
+  rec(self); return out
+end
 function Instance_mt.GetChildren(self)
   local out = {}
   for i, c in ipairs(rawget(self,"_kids") or {}) do out[i] = c end
@@ -50,7 +74,7 @@ function Instance_mt.GetChildren(self)
 end
 function Instance_mt.WaitForChild(self, n) return Instance_mt.FindFirstChild(self, n) end
 
-local function new(class, name, parent)
+new = function(class, name, parent)
   local o = setmetatable({ClassName=class, Name=name, _kids={}, Value=nil}, Instance_mt)
   rawset(o, "Parent", parent)
   if parent then table.insert(rawget(parent,"_kids"), o) end
@@ -134,11 +158,36 @@ function M.install(env, opts)
   MPS.PromptGamePassPurchaseFinished = newSignal()
   M.MPS = MPS
 
+  -- DataStore
+  M.store = {}
+  M.storeFail = false
+  local DS = {}
+  local storeObj = {}
+  storeObj.GetAsync = function(a1, a2)
+    local k; if a1 == storeObj then k = a2 else k = a1 end
+    if M.storeFail then error("ds down") end
+    return M.store[k]
+  end
+  storeObj.SetAsync = function(a1, a2, a3)
+    local k, v
+    if a1 == storeObj then k, v = a2, a3 else k, v = a1, a2 end
+    if M.storeFail then error("ds down") end
+    M.store[k] = v
+    return true
+  end
+  DS.GetDataStore = function() return storeObj end
+  M.DS = DS
+
+  local ServerStorage = new("ServerStorage","ServerStorage")
+  M.ServerStorage = ServerStorage
+
   local map = {
     ReplicatedStorage=ReplicatedStorage, Workspace=Workspace, Players=Players,
     TextService=TextService, MarketplaceService=MPS,
+    DataStoreService=DS, ServerStorage=ServerStorage,
   }
-  env.game = {GetService=function(a1, a2)
+  env.typeof = env.typeof
+  env.game = {BindToClose=function() end, GetService=function(a1, a2)
     local n; if type(a1)=="string" then n=a1 else n=a2 end
     return map[n]
   end}

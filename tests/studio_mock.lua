@@ -92,18 +92,24 @@ M.cfnew = cfnew
 local Inst = {}
 Inst.__newindex = function(t,k,v)
   if k == "Parent" then
-    local old = rawget(t,"Parent")
+    local old = rawget(t,"_parent")
     if old then
       local kk = rawget(old,"_kids")
-      for i,c in ipairs(kk) do if c==t then table.remove(kk,i) break end end
+      if kk then
+        for i,c in ipairs(kk) do if c==t then table.remove(kk,i) break end end
+      end
     end
-    rawset(t,"Parent",v)
-    if v then table.insert(rawget(v,"_kids"), t) end
+    rawset(t,"_parent",v)
+    if v then
+      local nk = rawget(v,"_kids")
+      if nk then table.insert(nk, t) end
+    end
     return
   end
   rawset(t,k,v)
 end
 Inst.__index = function(t,k)
+  if k == "Parent" then return rawget(t,"_parent") end
   if k == "Position" then
     local cf = rawget(t,"CFrame")
     if cf then return v3(cf.X, cf.Y, cf.Z) end
@@ -139,33 +145,33 @@ function Inst.GetDescendants(self)
 end
 function Inst.IsDescendantOf(self, other)
   if other == nil then return false end
-  local cur = rawget(self,"Parent")
+  local cur = rawget(self,"_parent")
   while cur do
     if cur == other then return true end
-    cur = rawget(cur,"Parent")
+    cur = rawget(cur,"_parent")
   end
   return false
 end
 function Inst.GetFullName(self)
   local parts={}
   local cur=self
-  while cur do table.insert(parts,1,rawget(cur,"Name")); cur=rawget(cur,"Parent") end
+  while cur do table.insert(parts,1,rawget(cur,"Name")); cur=rawget(cur,"_parent") end
   return table.concat(parts,".")
 end
 function Inst.Destroy(self)
   M.destroyed = M.destroyed + 1
-  local p = rawget(self,"Parent")
+  local p = rawget(self,"_parent")
   if p then
     local kk=rawget(p,"_kids")
     for i,c in ipairs(kk) do if c==self then table.remove(kk,i) break end end
   end
-  rawset(self,"Parent",nil)
+  rawset(self,"_parent",nil)
   rawset(self,"_destroyed",true)
 end
 function Inst.Clone(self)
   local c = M.new(rawget(self,"ClassName"), rawget(self,"Name"), nil)
   for k,v in pairs(self) do
-    if k~="_kids" and k~="Parent" then
+    if k~="_kids" and k~="Parent" and k~="_parent" then
       if getmetatable(v)==CF then rawset(c,k,cfnew(v.X,v.Y,v.Z,{table.unpack(v.R)}))
       elseif getmetatable(v)==V3 then rawset(c,k,v3(v.X,v.Y,v.Z))
       else rawset(c,k,v) end
@@ -179,7 +185,6 @@ end
 
 function M.new(class, name, parent)
   local o = setmetatable({ClassName=class, Name=name, _kids={}}, Inst)
-  rawset(o,"Parent",nil)
   if parent then o.Parent = parent end
   return o
 end
