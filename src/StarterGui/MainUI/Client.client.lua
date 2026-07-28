@@ -65,6 +65,9 @@ local THEME = {
 	CardBackground = Color3.fromRGB(22, 23, 27),
 	TabActive = Color3.fromRGB(34, 36, 42),
 	TabIdle = Color3.fromRGB(20, 21, 25),
+	AdminBackground = Color3.fromRGB(46, 30, 58),
+	AdminText = Color3.fromRGB(214, 170, 255),
+
 	BuyBackground = Color3.fromRGB(28, 92, 44),
 	BuyStroke = Color3.fromRGB(74, 190, 104),
 	BuyText = Color3.fromRGB(190, 255, 205),
@@ -642,6 +645,397 @@ local function BuildShopRow(entry, order)
 end
 
 -------------------------------------------------------------------------------
+-- Admin panel
+-------------------------------------------------------------------------------
+--[[
+	Same look as the shop: heavy black outline, dark cards, sidebar-free.
+	Left column lists every pass, right column edits the selected one.
+
+	Hidden entirely unless the server says this player is an admin, and every
+	action is re-checked server side anyway.
+--]]
+
+local IsAdminClient = false
+
+local AdminButton = ScreenGui:FindFirstChild("AdminButton")
+if not AdminButton then
+	AdminButton = Instance.new("TextButton")
+	AdminButton.Name = "AdminButton"
+	AdminButton.Parent = ScreenGui
+end
+AdminButton.Size = ToggleButton.Size
+AdminButton.Position = UDim2.new(
+	ToggleButton.Position.X.Scale,
+	ToggleButton.Position.X.Offset,
+	ToggleButton.Position.Y.Scale - 0.17,
+	ToggleButton.Position.Y.Offset
+)
+AdminButton.Text = "Admin"
+AdminButton.TextScaled = true
+AdminButton.Font = TITLE_FONT
+AdminButton.BackgroundColor3 = THEME.AdminBackground
+AdminButton.TextColor3 = THEME.AdminText
+AdminButton.BorderSizePixel = 0
+AdminButton.Visible = false
+GetOrMakeCorner(AdminButton, SHOP_CORNER)
+StyleBorder(AdminButton, THEME.ShopOutline, 4)
+AddSheen(AdminButton)
+
+local AdminFrame = ScreenGui:FindFirstChild("AdminFrame")
+if not AdminFrame then
+	AdminFrame = Instance.new("Frame")
+	AdminFrame.Name = "AdminFrame"
+	AdminFrame.Parent = ScreenGui
+end
+AdminFrame.Visible = false
+AdminFrame.Size = UDim2.new(0.62, 0, 0.60, 0)
+AdminFrame.Position = UDim2.new(0.5, 0, 0.5, 0)
+AdminFrame.AnchorPoint = Vector2.new(0.5, 0.5)
+AdminFrame.BackgroundColor3 = THEME.PanelBackground
+AdminFrame.BorderSizePixel = 0
+GetOrMakeCorner(AdminFrame, SHOP_CORNER)
+StyleBorder(AdminFrame, THEME.ShopOutline, 4)
+AddSheen(AdminFrame)
+
+local AdminTitle = AdminFrame:FindFirstChild("AdminTitle")
+if not AdminTitle then
+	AdminTitle = Instance.new("TextLabel")
+	AdminTitle.Name = "AdminTitle"
+	AdminTitle.Parent = AdminFrame
+end
+AdminTitle.Size = UDim2.new(1, 0, 0.13, 0)
+AdminTitle.Position = UDim2.new(0.5, 0, -0.015, 0)
+AdminTitle.AnchorPoint = Vector2.new(0.5, 1)
+AdminTitle.BackgroundTransparency = 1
+AdminTitle.Text = "Admin"
+AdminTitle.TextScaled = true
+AdminTitle.Font = TITLE_FONT
+AdminTitle.TextColor3 = THEME.Text
+do
+	local st = AdminTitle:FindFirstChildOfClass("UIStroke")
+	if not st then
+		st = Instance.new("UIStroke")
+		st.Parent = AdminTitle
+	end
+	st.Color = THEME.ShopOutline
+	st.Thickness = 4
+end
+
+local AdminClose = AdminFrame:FindFirstChild("AdminClose")
+if not AdminClose then
+	AdminClose = Instance.new("TextButton")
+	AdminClose.Name = "AdminClose"
+	AdminClose.Parent = AdminFrame
+end
+AdminClose.Size = UDim2.new(0.056, 0, 0.093, 0)
+AdminClose.Position = UDim2.new(1, 0, 0, 0)
+AdminClose.AnchorPoint = Vector2.new(0.5, 0.5)
+AdminClose.Text = "X"
+AdminClose.TextScaled = true
+AdminClose.Font = TITLE_FONT
+AdminClose.BackgroundColor3 = THEME.DangerBackground
+AdminClose.TextColor3 = THEME.DangerText
+AdminClose.BorderSizePixel = 0
+AdminClose.ZIndex = 5
+GetOrMakeCorner(AdminClose, UDim.new(1, 0))
+StyleBorder(AdminClose, THEME.ShopOutline, 3)
+
+-- Left: the list of passes.
+local AdminList = AdminFrame:FindFirstChild("AdminList")
+if not AdminList then
+	AdminList = Instance.new("ScrollingFrame")
+	AdminList.Name = "AdminList"
+	AdminList.Parent = AdminFrame
+end
+AdminList.Size = UDim2.new(0.32, 0, 0.78, 0)
+AdminList.Position = UDim2.new(0.03, 0, 0.05, 0)
+AdminList.BackgroundColor3 = THEME.CardBackground
+AdminList.BorderSizePixel = 0
+AdminList.ScrollBarThickness = 6
+AdminList.ScrollBarImageColor3 = THEME.PanelStroke
+AdminList.CanvasSize = UDim2.new(0, 0, 0, 0)
+AdminList.AutomaticCanvasSize = Enum.AutomaticSize.Y
+GetOrMakeCorner(AdminList, CONTROL_CORNER)
+StyleBorder(AdminList, THEME.ShopOutline, 3)
+
+local listLayout = AdminList:FindFirstChildOfClass("UIListLayout")
+if not listLayout then
+	listLayout = Instance.new("UIListLayout")
+	listLayout.Parent = AdminList
+end
+listLayout.SortOrder = Enum.SortOrder.LayoutOrder
+listLayout.Padding = UDim.new(0, 4)
+listLayout.HorizontalAlignment = Enum.HorizontalAlignment.Center
+
+local listPad = AdminList:FindFirstChildOfClass("UIPadding")
+if not listPad then
+	listPad = Instance.new("UIPadding")
+	listPad.Parent = AdminList
+end
+listPad.PaddingTop = UDim.new(0, 6)
+
+local NewButton = AdminFrame:FindFirstChild("NewPass")
+if not NewButton then
+	NewButton = Instance.new("TextButton")
+	NewButton.Name = "NewPass"
+	NewButton.Parent = AdminFrame
+end
+NewButton.Size = UDim2.new(0.32, 0, 0.10, 0)
+NewButton.Position = UDim2.new(0.03, 0, 0.85, 0)
+NewButton.Text = "+ New Gamepass"
+NewButton.TextScaled = true
+NewButton.Font = TITLE_FONT
+NewButton.BackgroundColor3 = THEME.BuyBackground
+NewButton.TextColor3 = THEME.BuyText
+NewButton.BorderSizePixel = 0
+GetOrMakeCorner(NewButton, CONTROL_CORNER)
+StyleBorder(NewButton, THEME.ShopOutline, 3)
+
+-- Right: the editor.
+local Editor = AdminFrame:FindFirstChild("Editor")
+if not Editor then
+	Editor = Instance.new("Frame")
+	Editor.Name = "Editor"
+	Editor.Parent = AdminFrame
+end
+Editor.Size = UDim2.new(0.60, 0, 0.90, 0)
+Editor.Position = UDim2.new(0.37, 0, 0.05, 0)
+Editor.BackgroundTransparency = 1
+
+local AdminFields = {}
+local AdminSelected = nil
+local AdminEntries = {}
+
+-- One labelled text box in the editor column.
+local function MakeField(name, label, order, placeholder)
+	local holder = Editor:FindFirstChild("F_" .. name)
+	if not holder then
+		holder = Instance.new("Frame")
+		holder.Name = "F_" .. name
+		holder.BackgroundTransparency = 1
+		holder.Parent = Editor
+	end
+	holder.LayoutOrder = order
+	holder.Size = UDim2.new(1, 0, 0.115, 0)
+
+	local cap = holder:FindFirstChild("Cap")
+	if not cap then
+		cap = Instance.new("TextLabel")
+		cap.Name = "Cap"
+		cap.Parent = holder
+	end
+	cap.Size = UDim2.new(0.26, 0, 1, 0)
+	cap.BackgroundTransparency = 1
+	cap.Text = label
+	cap.TextScaled = true
+	cap.Font = BODY_FONT
+	cap.TextColor3 = THEME.MutedText
+	cap.TextXAlignment = Enum.TextXAlignment.Left
+
+	local box = holder:FindFirstChild("Box")
+	if not box then
+		box = Instance.new("TextBox")
+		box.Name = "Box"
+		box.Parent = holder
+	end
+	box.Size = UDim2.new(0.72, 0, 0.82, 0)
+	box.Position = UDim2.new(0.28, 0, 0.09, 0)
+	box.BackgroundColor3 = THEME.InputBackground
+	box.BorderSizePixel = 0
+	box.Text = ""
+	box.PlaceholderText = placeholder or ""
+	box.PlaceholderColor3 = THEME.Placeholder
+	box.TextColor3 = THEME.Text
+	box.TextScaled = true
+	box.ClearTextOnFocus = false
+	GetOrMakeCorner(box, CONTROL_CORNER)
+	StyleBorder(box, THEME.InputStroke, 2)
+
+	AdminFields[name] = box
+	return box
+end
+
+local editorLayout = Editor:FindFirstChildOfClass("UIListLayout")
+if not editorLayout then
+	editorLayout = Instance.new("UIListLayout")
+	editorLayout.Parent = Editor
+end
+editorLayout.SortOrder = Enum.SortOrder.LayoutOrder
+editorLayout.Padding = UDim.new(0, 6)
+
+MakeField("Key", "Key", 1, "SPEED_PASS")
+MakeField("Title", "Name", 2, "Speed Boost")
+MakeField("Id", "Asset ID", 3, "356360")
+MakeField("Price", "Price", 4, "Gamepass")
+MakeField("Icon", "Icon ID", 5, "rbxassetid:// or blank")
+MakeField("Blurb", "Blurb", 6, "What it does")
+MakeField("Category", "Category", 7, "Passes")
+
+local AdminStatus = Editor:FindFirstChild("AdminStatus")
+if not AdminStatus then
+	AdminStatus = Instance.new("TextLabel")
+	AdminStatus.Name = "AdminStatus"
+	AdminStatus.Parent = Editor
+end
+AdminStatus.LayoutOrder = 8
+AdminStatus.Size = UDim2.new(1, 0, 0.08, 0)
+AdminStatus.BackgroundTransparency = 1
+AdminStatus.Text = ""
+AdminStatus.TextScaled = true
+AdminStatus.Font = BODY_FONT
+AdminStatus.TextColor3 = THEME.MutedText
+
+local Buttons = Editor:FindFirstChild("Buttons")
+if not Buttons then
+	Buttons = Instance.new("Frame")
+	Buttons.Name = "Buttons"
+	Buttons.BackgroundTransparency = 1
+	Buttons.Parent = Editor
+end
+Buttons.LayoutOrder = 9
+Buttons.Size = UDim2.new(1, 0, 0.12, 0)
+
+local SaveButton = Buttons:FindFirstChild("Save")
+if not SaveButton then
+	SaveButton = Instance.new("TextButton")
+	SaveButton.Name = "Save"
+	SaveButton.Parent = Buttons
+end
+SaveButton.Size = UDim2.new(0.48, 0, 1, 0)
+SaveButton.Text = "Save"
+SaveButton.TextScaled = true
+SaveButton.Font = TITLE_FONT
+SaveButton.BackgroundColor3 = THEME.BuyBackground
+SaveButton.TextColor3 = THEME.BuyText
+SaveButton.BorderSizePixel = 0
+GetOrMakeCorner(SaveButton, CONTROL_CORNER)
+StyleBorder(SaveButton, THEME.ShopOutline, 3)
+
+local DeleteButton = Buttons:FindFirstChild("Delete")
+if not DeleteButton then
+	DeleteButton = Instance.new("TextButton")
+	DeleteButton.Name = "Delete"
+	DeleteButton.Parent = Buttons
+end
+DeleteButton.Size = UDim2.new(0.48, 0, 1, 0)
+DeleteButton.Position = UDim2.new(0.52, 0, 0, 0)
+DeleteButton.Text = "Delete"
+DeleteButton.TextScaled = true
+DeleteButton.Font = TITLE_FONT
+DeleteButton.BackgroundColor3 = THEME.DangerBackground
+DeleteButton.TextColor3 = THEME.DangerText
+DeleteButton.BorderSizePixel = 0
+GetOrMakeCorner(DeleteButton, CONTROL_CORNER)
+StyleBorder(DeleteButton, THEME.ShopOutline, 3)
+
+local function SetAdminStatus(msg, bad)
+	AdminStatus.Text = msg or ""
+	if bad then
+		AdminStatus.TextColor3 = THEME.Bad
+	else
+		AdminStatus.TextColor3 = THEME.Good
+	end
+end
+
+local function LoadIntoEditor(entry)
+	AdminSelected = entry and entry.Key or nil
+
+	if not entry then
+		AdminFields.Key.Text = ""
+		AdminFields.Title.Text = ""
+		AdminFields.Id.Text = ""
+		AdminFields.Price.Text = "Gamepass"
+		AdminFields.Icon.Text = ""
+		AdminFields.Blurb.Text = ""
+		AdminFields.Category.Text = "Passes"
+		AdminFields.Key.TextEditable = true
+		AdminFields.Id.TextEditable = true
+		DeleteButton.Visible = false
+		SetAdminStatus("New gamepass", false)
+		return
+	end
+
+	AdminFields.Key.Text = entry.Key
+	AdminFields.Title.Text = entry.Title or ""
+	AdminFields.Id.Text = tostring(entry.Id or "")
+	AdminFields.Price.Text = entry.Price or ""
+	AdminFields.Icon.Text = entry.Icon or ""
+	AdminFields.Blurb.Text = entry.Blurb or ""
+	AdminFields.Category.Text = entry.Category or "Passes"
+
+	-- Built ins are wired into the booth logic, so their key and id are locked.
+	AdminFields.Key.TextEditable = not entry.Builtin
+	AdminFields.Id.TextEditable = not entry.Builtin
+	DeleteButton.Visible = not entry.Builtin
+
+	if entry.Builtin then
+		SetAdminStatus("Built in: key and ID locked", false)
+	else
+		SetAdminStatus("", false)
+	end
+end
+
+local AdminRows = {}
+
+local function BuildAdminRow(entry, order)
+	local row = AdminRows[entry.Key]
+	if not row then
+		row = Instance.new("TextButton")
+		row.Name = "L_" .. entry.Key
+		row.Parent = AdminList
+		row.MouseButton1Click:Connect(function()
+			LoadIntoEditor(AdminEntries[entry.Key])
+		end)
+		AdminRows[entry.Key] = row
+	end
+	row.LayoutOrder = order
+	row.Size = UDim2.new(0.92, 0, 0, 30)
+	row.Text = entry.Title or entry.Key
+	row.TextScaled = true
+	row.Font = BODY_FONT
+	row.BackgroundColor3 = THEME.TabIdle
+	row.TextColor3 = THEME.Text
+	row.BorderSizePixel = 0
+	GetOrMakeCorner(row, CONTROL_CORNER)
+	StyleBorder(row, THEME.ShopOutline, 2)
+	return row
+end
+
+NewButton.MouseButton1Click:Connect(function()
+	LoadIntoEditor(nil)
+end)
+
+SaveButton.MouseButton1Click:Connect(function()
+	RemoteEvent:FireServer("AdminSavePass", {
+		Key = AdminFields.Key.Text,
+		Title = AdminFields.Title.Text,
+		Id = tonumber(AdminFields.Id.Text),
+		Price = AdminFields.Price.Text,
+		Icon = AdminFields.Icon.Text,
+		Blurb = AdminFields.Blurb.Text,
+		Category = AdminFields.Category.Text,
+	})
+	SetAdminStatus("Saving..", false)
+end)
+
+DeleteButton.MouseButton1Click:Connect(function()
+	if AdminSelected then
+		RemoteEvent:FireServer("AdminDeletePass", AdminSelected)
+	end
+end)
+
+AdminClose.MouseButton1Click:Connect(function()
+	AdminFrame.Visible = false
+end)
+
+AdminButton.MouseButton1Click:Connect(function()
+	AdminFrame.Visible = not AdminFrame.Visible
+	if AdminFrame.Visible then
+		RemoteEvent:FireServer("AdminOpen")
+	end
+end)
+
+-------------------------------------------------------------------------------
 -- Pass state
 -------------------------------------------------------------------------------
 
@@ -820,6 +1214,43 @@ RemoteEvent.OnClientEvent:Connect(function(Argument, Argument2, Argument3)
 
 	elseif Argument == "TextError" then
 		SetStatus(Argument2 or "That text could not be used.", true)
+
+	elseif Argument == "AdminAccess" then
+		IsAdminClient = (Argument2 == true)
+		AdminButton.Visible = IsAdminClient
+		if not IsAdminClient then
+			AdminFrame.Visible = false
+		end
+
+	elseif Argument == "AdminState" then
+		if type(Argument2) == "table" then
+			local seen = {}
+			for i, entry in ipairs(Argument2) do
+				AdminEntries[entry.Key] = entry
+				BuildAdminRow(entry, i)
+				seen[entry.Key] = true
+			end
+			-- Drop rows for passes that no longer exist.
+			for key, row in pairs(AdminRows) do
+				if not seen[key] then
+					row:Destroy()
+					AdminRows[key] = nil
+					AdminEntries[key] = nil
+					if AdminSelected == key then
+						LoadIntoEditor(nil)
+					end
+				end
+			end
+			if AdminSelected and AdminEntries[AdminSelected] then
+				LoadIntoEditor(AdminEntries[AdminSelected])
+			end
+		end
+
+	elseif Argument == "AdminOk" then
+		SetAdminStatus(Argument2 or "Done.", false)
+
+	elseif Argument == "AdminError" then
+		SetAdminStatus(Argument2 or "That did not work.", true)
 	end
 end)
 
@@ -1012,7 +1443,10 @@ end)
 
 Frame.Visible = false
 ShopFrame.Visible = false
+AdminFrame.Visible = false
+AdminButton.Visible = false
 BoomPanel.Visible = false
+LoadIntoEditor(nil)
 ToggleButton.Visible = false
 SetStatus("")
 UpdateButtonText()

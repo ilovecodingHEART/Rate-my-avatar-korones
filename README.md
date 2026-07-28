@@ -102,6 +102,14 @@ catalog item is priced at.
 Tabs come from `SHOP_CATEGORIES`. Add a name there, tag items with that
 `Category`, and the tab appears.
 
+### Admin panel
+
+Only visible to admins. Left column lists every gamepass, right column edits
+the selected one. Creating a pass is filling in the fields and pressing Save —
+no code edit, no restart.
+
+![Admin panel](docs/gui-admin.png)
+
 ### Boombox
 
 Appears at the bottom of the screen only while the tool is equipped.
@@ -133,6 +141,49 @@ So the server repairs it itself on every boot:
 - sweeps Workspace, adopts anything shaped like a booth, renames it `Booth`
 - ignores models that only *look* similar
 - builds `ServerStorage.Boombox` if absent
+
+## Admin panel
+
+Set who gets in at the top of the server script:
+
+```lua
+local ADMINS = {
+    "Thugshaker",
+    "ywinfe",
+}
+local ALLOW_PLACE_OWNER = true
+```
+
+Usernames or UserIds both work. The place owner is always let in, so a typo
+cannot lock you out.
+
+### Adding a gamepass
+
+Press **+ New Gamepass**, fill in the fields, press **Save**. It appears in
+everyone's shop immediately — no rejoin, no code change.
+
+| Field | Meaning |
+|---|---|
+| Key | Internal name. Auto-uppercased, spaces become `_` |
+| Name | Shown on the card |
+| Asset ID | The number from the catalog URL |
+| Price | Label only; the real cost is the catalog price |
+| Icon ID | Accepts a bare id, `rbxassetid://`, or a link with `?id=` |
+| Blurb | One line of description |
+| Category | Which sidebar tab it lands in |
+
+Custom passes are saved in a DataStore and reload on boot. Purchases route
+automatically, because the id lookup is rebuilt on every change.
+
+### What is protected
+
+- **Built ins cannot be deleted**, and their **Key and Asset ID are locked**,
+  because `UPLOAD` / `PERMANENT` / `BOOMBOX` are wired into the booth logic.
+  Their name, blurb, icon and price are still editable.
+- Editing a built in is a **live-only** change; the script wins on next boot.
+- Duplicate asset IDs are refused, since the purchase router keys on the id.
+- **Every action is re-checked on the server.** Hiding the button is cosmetic;
+  a non-admin firing the remote by hand is refused and logged.
 
 ## Gamepasses
 
@@ -177,7 +228,8 @@ used instead.
 
 ```bash
 python -m venv .venv && .venv/bin/pip install lupa pillow
-.venv/bin/python tests/test_features.py     # 39 checks
+.venv/bin/python tests/test_features.py     # 45 checks
+.venv/bin/python tests/test_admin.py        # 33 checks
 .venv/bin/python tests/test_rateava3.py     # 8 checks, against the real place file
 .venv/bin/python tests/render_previews.py   # regenerate the images above
 ```

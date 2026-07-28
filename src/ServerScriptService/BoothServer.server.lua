@@ -88,7 +88,9 @@ local SAVE_RETRIES = 3
 	the real price is whatever the catalog item costs.
 --]]
 
-local PASSES = {
+-- The three built in passes. These can never be deleted from the admin panel,
+-- because UPLOAD / PERMANENT / BOOMBOX are wired into the booth logic.
+local BUILTIN_PASSES = {
 	UPLOAD = {
 		Id = 356360,
 		IsGamePass = false,
@@ -97,15 +99,8 @@ local PASSES = {
 		Blurb = "Put your own image on the booth you claim.",
 		Icon = "",
 		Price = "Gamepass",
-	},
-	BOOMBOX = {
-		Id = 353454,
-		IsGamePass = false,
-		Category = "Passes",
-		Title = "Boombox",
-		Blurb = "Carry a boombox and play any audio ID.",
-		Icon = "",
-		Price = "Gamepass",
+		Order = 1,
+		Builtin = true,
 	},
 	PERMANENT = {
 		Id = 353447,
@@ -115,15 +110,53 @@ local PASSES = {
 		Blurb = "Your image stays on the booth after you leave.",
 		Icon = "",
 		Price = "Gamepass",
+		Order = 2,
+		Builtin = true,
+	},
+	BOOMBOX = {
+		Id = 353454,
+		IsGamePass = false,
+		Category = "Passes",
+		Title = "Boombox",
+		Blurb = "Carry a boombox and play any audio ID.",
+		Icon = "",
+		Price = "Gamepass",
+		Order = 3,
+		Builtin = true,
 	},
 }
 
--- Order the shop lists them in.
-local SHOP_ORDER = {"UPLOAD", "PERMANENT", "BOOMBOX"}
+-- Live table: built ins plus anything added through the admin panel.
+local PASSES = {}
 
--- Sidebar tabs, in order. Add a category here and tag items with it to grow
--- the shop; a tab with nothing in it simply shows an empty message.
+-- Rebuilt whenever the pass list changes; never hand write these.
+local SHOP_ORDER = {}
+local ById = {}
+
+-- Sidebar tabs, in order. A tab with nothing in it shows an empty message.
 local SHOP_CATEGORIES = {"Passes", "Items"}
+
+-------------------------------------------------------------------------------
+-- Admins
+-------------------------------------------------------------------------------
+--[[
+	Who can open the admin panel. Use usernames, UserIds, or both.
+
+	    local ADMINS = {"Thugshaker", "ywinfe", 12345}
+
+	The panel button is hidden from everyone else, but that is only cosmetic:
+	every admin action is re-checked on the server, so a non admin firing the
+	remote by hand still gets refused.
+--]]
+local ADMINS = {
+	"Thugshaker",
+	"ywinfe",
+}
+
+-- Also let whoever owns the place in, so you are never locked out.
+local ALLOW_PLACE_OWNER = true
+
+local PASS_DATASTORE = "ShopPasses_v1"
 
 -- Player-facing wording never names the shirts.
 local PASS_WORD = "Gamepass"
@@ -152,6 +185,123 @@ if USE_DATASTORE then
 		warn("[Booth] DataStore unavailable, permanent images will not persist: " .. tostring(res))
 	end
 end
+
+-------------------------------------------------------------------------------
+-- Pass registry
+-------------------------------------------------------------------------------
+
+local PassStore = nil
+if USE_DATASTORE then
+	local ok, res = pcall(function()
+		return DataStoreService:GetDataStore(PASS_DATASTORE)
+	end)
+	if ok then
+		PassStore = res
+	else
+		warn("[Admin] Pass DataStore unavailable, custom passes will not persist.")
+	end
+end
+
+-- Sorts the shop and refreshes the id lookup. Call after ANY change to PASSES.
+local function RebuildPassIndex()
+	SHOP_ORDER = {}
+	for Key in pairs(PASSES) do
+		SHOP_ORDER[#SHOP_ORDER + 1] = Key
+	end
+
+	table.sort(SHOP_ORDER, function(a, b)
+		local pa, pb = PASSES[a], PASSES[b]
+		local oa = pa.Order or 999
+		local ob = pb.Order or 999
+		if oa ~= ob then
+			return oa < ob
+		end
+		return a < b
+	end)
+
+	ById = {}
+	for Key, Pass in pairs(PASSES) do
+		ById[Pass.Id] = Key
+	end
+end
+
+local function ResetToBuiltins()
+	PASSES = {}
+	for Key, Pass in pairs(BUILTIN_PASSES) do
+		local copy = {}
+		for k, v in pairs(Pass) do
+			copy[k] = v
+		end
+		PASSES[Key] = copy
+	end
+end
+
+-- Only the custom ones are saved. Built ins always come from the script, so
+-- editing them in code takes effect on the next boot.
+local function SaveCustomPasses()
+	if not PassStore then
+		return false
+	end
+
+	local custom = {}
+	for Key, Pass in pairs(PASSES) do
+		if not Pass.Builtin then
+			custom[Key] = {
+				Id = Pass.Id,
+				IsGamePass = Pass.IsGamePass and true or false,
+				Category = Pass.Category,
+				Title = Pass.Title,
+				Blurb = Pass.Blurb,
+				Icon = Pass.Icon,
+				Price = Pass.Price,
+				Order = Pass.Order,
+			}
+		end
+	end
+
+	local ok, err = pcall(function()
+		PassStore:SetAsync("passes", custom)
+	end)
+	if not ok then
+		warn("[Admin] Could not save passes: " .. tostring(err))
+	end
+	return ok
+end
+
+local function LoadCustomPasses()
+	ResetToBuiltins()
+
+	if PassStore then
+		local ok, res = pcall(function()
+			return PassStore:GetAsync("passes")
+		end)
+		if ok and type(res) == "table" then
+			for Key, Pass in pairs(res) do
+				-- Never let a saved entry shadow a built in.
+				if type(Key) == "string" and not BUILTIN_PASSES[Key] and type(Pass) == "table"
+					and type(Pass.Id) == "number" then
+					PASSES[Key] = {
+						Id = Pass.Id,
+						IsGamePass = Pass.IsGamePass and true or false,
+						Category = Pass.Category or "Passes",
+						Title = Pass.Title or Key,
+						Blurb = Pass.Blurb or "",
+						Icon = Pass.Icon or "",
+						Price = Pass.Price or "Gamepass",
+						Order = Pass.Order or 100,
+						Builtin = false,
+					}
+				end
+			end
+		elseif not ok then
+			warn("[Admin] Could not load passes: " .. tostring(res))
+		end
+	end
+
+	RebuildPassIndex()
+end
+
+LoadCustomPasses()
 
 -------------------------------------------------------------------------------
 -- Self healing
@@ -401,6 +551,214 @@ local function PushPassState(Player, UseCache)
 		RemoteEvent:FireClient(Player, "PassState", state, SHOP_CATEGORIES)
 	end
 	return state
+end
+
+-------------------------------------------------------------------------------
+-- Admin
+-------------------------------------------------------------------------------
+
+local AdminCache = {}
+
+local function IsAdmin(Player)
+	if AdminCache[Player] ~= nil then
+		return AdminCache[Player]
+	end
+
+	local allowed = false
+
+	for _, entry in ipairs(ADMINS) do
+		if type(entry) == "number" then
+			if Player.UserId == entry then
+				allowed = true
+				break
+			end
+		elseif type(entry) == "string" then
+			if string.lower(Player.Name) == string.lower(entry) then
+				allowed = true
+				break
+			end
+		end
+	end
+
+	-- Place owner always gets in, so a typo in ADMINS cannot lock you out.
+	if not allowed and ALLOW_PLACE_OWNER and game.CreatorType == Enum.CreatorType.User then
+		if Player.UserId == game.CreatorId then
+			allowed = true
+		end
+	end
+
+	AdminCache[Player] = allowed
+	return allowed
+end
+
+-- Keys are used as table indexes and sent over the remote, so keep them tame.
+local function CleanKey(raw)
+	if type(raw) ~= "string" then
+		return nil
+	end
+	local key = string.upper(string.gsub(raw, "%s+", "_"))
+	key = string.gsub(key, "[^A-Z0-9_]", "")
+	if key == "" or string.len(key) > 24 then
+		return nil
+	end
+	return key
+end
+
+local function CleanText(raw, limit)
+	if type(raw) ~= "string" then
+		return ""
+	end
+	raw = string.gsub(raw, "[\n\r\t]", " ")
+	return string.sub(raw, 1, limit)
+end
+
+local function CleanAssetString(raw)
+	if type(raw) ~= "string" or raw == "" then
+		return ""
+	end
+	local digits = string.match(raw, "^%s*(%d+)%s*$")
+		or string.match(raw, "^%s*rbxassetid://(%d+)%s*$")
+		or string.match(raw, "[?&]id=(%d+)")
+	if not digits or string.len(digits) > 18 then
+		return ""
+	end
+	return "rbxassetid://" .. digits
+end
+
+-- The admin panel's view: every pass, including ones nobody owns.
+local function PushAdminState(Player)
+	if not IsAdmin(Player) then
+		return
+	end
+
+	local list = {}
+	for _, Key in ipairs(SHOP_ORDER) do
+		local Pass = PASSES[Key]
+		list[#list + 1] = {
+			Key = Key,
+			Id = Pass.Id,
+			Category = Pass.Category,
+			Title = Pass.Title,
+			Blurb = Pass.Blurb,
+			Icon = Pass.Icon,
+			Price = Pass.Price,
+			Order = Pass.Order or 100,
+			Builtin = Pass.Builtin and true or false,
+		}
+	end
+
+	RemoteEvent:FireClient(Player, "AdminState", list, SHOP_CATEGORIES)
+end
+
+-- Everyone in the server needs to see a shop change immediately.
+local function BroadcastShop()
+	for _, p in ipairs(Players:GetPlayers()) do
+		PushPassState(p, true)
+		if IsAdmin(p) then
+			PushAdminState(p)
+		end
+	end
+end
+
+local function AdminSavePass(Player, data)
+	if type(data) ~= "table" then
+		return "Bad data."
+	end
+
+	local key = CleanKey(data.Key)
+	if not key then
+		return "Key must be letters, numbers or underscores."
+	end
+
+	local id = tonumber(data.Id)
+	if not id or id <= 0 or id ~= math.floor(id) then
+		return "Asset ID must be a whole number."
+	end
+
+	local title = CleanText(data.Title, 40)
+	if string.match(title, "^%s*$") then
+		return "Give it a title."
+	end
+
+	local existing = PASSES[key]
+
+	-- Two passes sharing an id would make the purchase router ambiguous.
+	for otherKey, other in pairs(PASSES) do
+		if other.Id == id and otherKey ~= key then
+			return "Asset ID " .. tostring(id) .. " is already used by " .. otherKey .. "."
+		end
+	end
+
+	local category = CleanText(data.Category, 20)
+	local known = false
+	for _, c in ipairs(SHOP_CATEGORIES) do
+		if c == category then
+			known = true
+			break
+		end
+	end
+	if not known then
+		category = SHOP_CATEGORIES[1]
+	end
+
+	if existing and existing.Builtin then
+		-- Built ins keep their key, id and wiring; only the presentation moves.
+		existing.Title = title
+		existing.Blurb = CleanText(data.Blurb, 90)
+		existing.Icon = CleanAssetString(data.Icon)
+		existing.Price = CleanText(data.Price, 20)
+		if existing.Price == "" then
+			existing.Price = PASS_WORD
+		end
+		existing.Category = category
+	else
+		PASSES[key] = {
+			Id = id,
+			IsGamePass = data.IsGamePass and true or false,
+			Category = category,
+			Title = title,
+			Blurb = CleanText(data.Blurb, 90),
+			Icon = CleanAssetString(data.Icon),
+			Price = CleanText(data.Price, 20),
+			Order = tonumber(data.Order) or 100,
+			Builtin = false,
+		}
+		if PASSES[key].Price == "" then
+			PASSES[key].Price = PASS_WORD
+		end
+	end
+
+	RebuildPassIndex()
+	SaveCustomPasses()
+
+	-- Ownership answers are keyed per pass, so a changed id must invalidate.
+	for _, cache in pairs(Ownership) do
+		cache[key] = nil
+	end
+
+	BroadcastShop()
+	return nil
+end
+
+local function AdminDeletePass(Player, key)
+	key = CleanKey(key)
+	if not key or not PASSES[key] then
+		return "No such pass."
+	end
+	if PASSES[key].Builtin then
+		return "Built in passes cannot be deleted."
+	end
+
+	PASSES[key] = nil
+	RebuildPassIndex()
+	SaveCustomPasses()
+
+	for _, cache in pairs(Ownership) do
+		cache[key] = nil
+	end
+
+	BroadcastShop()
+	return nil
 end
 
 -------------------------------------------------------------------------------
@@ -797,6 +1155,45 @@ RemoteEvent.OnServerEvent:Connect(function(Player, Argument, Argument2)
 			PushPassState(Player, true)
 		end
 		return
+
+	elseif Argument == "AdminOpen" then
+		-- Checked server side. Hiding the button is only cosmetic.
+		if IsAdmin(Player) then
+			PushAdminState(Player)
+		end
+		return
+
+	elseif Argument == "AdminSavePass" then
+		if not IsAdmin(Player) then
+			warn("[Admin] " .. Player.Name .. " tried to save a pass without access.")
+			return
+		end
+		if not CheckCooldown(Player) then
+			return
+		end
+		local err = AdminSavePass(Player, Argument2)
+		if err then
+			RemoteEvent:FireClient(Player, "AdminError", err)
+		else
+			RemoteEvent:FireClient(Player, "AdminOk", "Saved.")
+		end
+		return
+
+	elseif Argument == "AdminDeletePass" then
+		if not IsAdmin(Player) then
+			warn("[Admin] " .. Player.Name .. " tried to delete a pass without access.")
+			return
+		end
+		if not CheckCooldown(Player) then
+			return
+		end
+		local err = AdminDeletePass(Player, Argument2)
+		if err then
+			RemoteEvent:FireClient(Player, "AdminError", err)
+		else
+			RemoteEvent:FireClient(Player, "AdminOk", "Deleted.")
+		end
+		return
 	end
 
 	local OwnedBooth = Player:FindFirstChild("OwnedBooth")
@@ -837,6 +1234,10 @@ local function PlayerAdded(Player)
 	end
 
 	RemoteEvent:FireClient(Player, "Start")
+
+	-- Tells the client whether to show the admin button at all.
+	RemoteEvent:FireClient(Player, "AdminAccess", IsAdmin(Player))
+
 	PushPassState(Player, false)
 
 	GiveBoombox(Player)
@@ -861,16 +1262,15 @@ local function PlayerRemoving(Player)
 	LastAction[Player] = nil
 	LastCheck[Player] = nil
 	Ownership[Player] = nil
+	AdminCache[Player] = nil
 end
 
 -------------------------------------------------------------------------------
 -- Purchase completion
 -------------------------------------------------------------------------------
 
-local ById = {}
-for Key, Pass in pairs(PASSES) do
-	ById[Pass.Id] = Key
-end
+-- ById is rebuilt by RebuildPassIndex whenever the pass list changes, so a
+-- pass added from the admin panel routes its purchase correctly straight away.
 
 local function OnPurchaseFinished(Player, Id, WasPurchased)
 	if not WasPurchased then

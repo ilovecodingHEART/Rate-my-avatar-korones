@@ -219,7 +219,10 @@ function M.install(env, opts)
     DataStoreService=DS, ServerStorage=ServerStorage,
   }
   env.typeof = env.typeof
-  env.game = {BindToClose=function() end, GetService=function(a1, a2)
+  env.Enum = env.Enum or {}
+  env.Enum.CreatorType = {User = "User", Group = "Group"}
+  env.game = {BindToClose=function() end, CreatorType="User", CreatorId=0,
+    GetService=function(a1, a2)
     local n; if type(a1)=="string" then n=a1 else n=a2 end
     return map[n]
   end}

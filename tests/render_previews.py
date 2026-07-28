@@ -26,8 +26,11 @@ for m in re.finditer(r'(\w+) = \{\s*Id = (\d+),\s*IsGamePass = \w+,\s*Category =
     k,i,cat,t,bl,icon,price = m.groups()
     PASSES.append({'key':k,'id':i,'cat':cat,'title':t,'blurb':bl,'icon':icon,'price':price})
 CATS=[x.strip().strip('"') for x in re.search(r'SHOP_CATEGORIES = \{([^}]+)\}', SERVER).group(1).split(',')]
-ORDER=[x.strip().strip('"') for x in re.search(r'SHOP_ORDER = \{([^}]+)\}', SERVER).group(1).split(',')]
-PASSES.sort(key=lambda p: ORDER.index(p['key']))
+# Shop order now comes from each pass's Order field, sorted at run time.
+ORDERS={}
+for m in re.finditer(r'(\w+) = \{\s*Id = \d+,.*?Order = (\d+),', SERVER, re.S):
+    ORDERS.setdefault(m.group(1), int(m.group(2)))
+PASSES.sort(key=lambda p: ORDERS.get(p['key'], 999))
 
 TOTAL=int(re.search(r'TOTAL_ASSETS = (\d+)', LOADER).group(1))
 LTITLE=re.search(r'^local TITLE = "([^"]+)"', LOADER, re.M).group(1)
@@ -260,6 +263,64 @@ def loading(path, pct=0.62, spin=20):
     img.resize((W//S,H//S),Image.LANCZOS).save(path)
     return path
 
+# -------------------------------------------------------------------- admin
+def admin(path):
+    FW,FH = int(0.62*1180*S), int(0.60*820*S)
+    M_=52*S; TOP=56*S
+    W,H = FW+M_*2, FH+M_+TOP
+    img,d = backdrop(W,H)
+    FX,FY = M_, TOP
+    OUT_=T['ShopOutline']
+
+    ctext(d,(FX,FY-TOP,FX+FW,FY),"Admin",font(int(TOP*0.66),True),T['Text'])
+    panel(d,img,(FX,FY,FX+FW,FY+FH),T['PanelBackground'],OUT_,16*S,4*S,True)
+
+    # left list
+    lx,ly = FX+0.03*FW, FY+0.05*FH
+    lw,lh = 0.32*FW, 0.78*FH
+    panel(d,img,(lx,ly,lx+lw,ly+lh),T['CardBackground'],OUT_,8*S,3*S)
+    names=[(p['title'],True) for p in PASSES]+[("Speed Boost",False)]
+    rh=30*S
+    for i,(nm,builtin) in enumerate(names):
+        ry=ly+8*S+i*(rh+4*S)
+        rb=(lx+0.04*lw,ry,lx+0.96*lw,ry+rh)
+        panel(d,img,rb,T['TabIdle'],OUT_,8*S,2*S)
+        ctext(d,rb,nm,font(int(rh*0.42)),T['Text'])
+    nb=(lx,FY+0.85*FH,lx+lw,FY+0.95*FH)
+    panel(d,img,nb,T['BuyBackground'],OUT_,8*S,3*S)
+    ctext(d,nb,"+ New Gamepass",font(int((nb[3]-nb[1])*0.40),True),T['BuyText'])
+
+    # right editor
+    ex,ey = FX+0.37*FW, FY+0.05*FH
+    ew,eh = 0.60*FW, 0.90*FH
+    rows=[("Key","SPEED_PASS"),("Name","Speed Boost"),("Asset ID","424242"),
+          ("Price","Gamepass"),("Icon ID","rbxassetid://12345"),
+          ("Blurb","Run faster."),("Category","Passes")]
+    fh_=0.115*eh
+    for i,(lab,val) in enumerate(rows):
+        fy=ey+i*(fh_+6*S)
+        ltext(d,(ex,fy,ex+0.26*ew,fy+fh_),lab,font(int(fh_*0.40)),T['MutedText'],padx=0)
+        bb=(ex+0.28*ew,fy+0.09*fh_,ex+ew,fy+0.91*fh_)
+        panel(d,img,bb,T['InputBackground'],T['InputStroke'],8*S,2*S)
+        ltext(d,bb,val,font(int(fh_*0.38)),T['Text'],padx=10*S)
+    sy=ey+7*(fh_+6*S)
+    ctext(d,(ex,sy,ex+ew,sy+0.08*eh),"Saved.",font(int(0.055*eh)),T['Good'])
+    by=sy+0.09*eh
+    sb=(ex,by,ex+0.48*ew,by+0.12*eh)
+    panel(d,img,sb,T['BuyBackground'],OUT_,8*S,3*S)
+    ctext(d,sb,"Save",font(int(0.12*eh*0.44),True),T['BuyText'])
+    db=(ex+0.52*ew,by,ex+ew,by+0.12*eh)
+    panel(d,img,db,T['DangerBackground'],OUT_,8*S,3*S)
+    ctext(d,db,"Delete",font(int(0.12*eh*0.44),True),T['DangerText'])
+
+    r=0.042*FW
+    cx,cy=FX+FW,FY
+    d.ellipse((cx-r,cy-r,cx+r,cy+r),fill=T['DangerBackground'],outline=OUT_,width=3*S)
+    ctext(d,(cx-r,cy-r,cx+r,cy+r),"X",font(int(r*1.0),True),T['DangerText'])
+
+    img.resize((W//S,H//S),Image.LANCZOS).save(path)
+    return path
+
 # ------------------------------------------------------------------ boombox
 def boombox(path):
     W,H=760*S,180*S
@@ -299,6 +360,7 @@ made=[
  shop(os.path.join(OUT,'gui-shop-owned.png'), {'UPLOAD','PERMANENT'}),
  shop(os.path.join(OUT,'gui-shop-items-tab.png'), set(), tab=CATS[1] if len(CATS)>1 else CATS[0]),
  hud(os.path.join(OUT,'gui-hud.png')),
+ admin(os.path.join(OUT,'gui-admin.png')),
  loading(os.path.join(OUT,'gui-loading.png')),
  loading(os.path.join(OUT,'gui-loading-spin.png'), pct=0.28, spin=58),
  boombox(os.path.join(OUT,'gui-boombox.png')),
