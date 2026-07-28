@@ -90,6 +90,23 @@ and you are only sent the ones your rank can use.
 
 The header greets you by name with your own avatar headshot: `Hello, <name>.`
 
+### The input dock
+
+Commands that take a value - a kick reason, an announcement, an hour for
+`/time` - read it from a single field pinned to the top of the screen, outside
+the panel.
+
+It is there because the panel is laid out in scale and shrunk by a `UIScale` to
+fit the window. That is right for rows of buttons and wrong for a text field:
+the field shrank with everything else until the text stopped being readable.
+The dock is fixed pixels and never scales, so it is the same size at 1920x1080
+as at 617x326, and it draws above the panel so it works even when the panel
+fills the screen.
+
+It replaced two separate boxes, on Home and Players, that always meant the same
+thing. One field now feeds every page, and it only appears on the pages that
+actually take a value.
+
 ## Commands
 
 Every command works two ways, and both go through the same function, so the
@@ -200,7 +217,7 @@ a test for each of those cases.
 python3 tools/runtests.py
 ```
 
-369 tests. They run the real `Server.server.lua` and `Client.client.lua`
+382 tests. They run the real `Server.server.lua` and `Client.client.lua`
 against a mock of the Roblox API (`tools/mock_roblox.lua`, `tools/harness.lua`)
 and drive both halves the way a player would, including pressing client buttons
 and checking what the server actually did.

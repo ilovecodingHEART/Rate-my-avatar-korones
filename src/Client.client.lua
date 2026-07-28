@@ -1019,6 +1019,9 @@ local WINDOW = {
 	AdminW = 736, AdminH = 400,
 	ReportW = 560, ReportH = 340,
 	MinScale = 0.5,
+	-- Height the input dock reserves at the top: its own height plus the gap
+	-- above it, plus a little breathing room below.
+	DockStrip = 62,
 }
 
 local function ScaleFor(frame, wantW, wantH, screen)
@@ -1040,10 +1043,22 @@ local function FitWindowsToScreen()
 		return
 	end
 
-	-- Fixed pixel sizes, then scaled. Laying out at a known size is what makes
-	-- the proportions predictable at every window.
+	--[[
+		Fixed pixel sizes, then scaled. Laying out at a known size is what
+		makes the proportions predictable at every window.
+
+		The height available is the screen MINUS the strip the input dock
+		occupies at the top. Without that the panel centres on the whole screen
+		and, on a small window where it fills the height, the dock lands on top
+		of its title. Reserving the strip and nudging the panel down by half of
+		it keeps the two apart at every size.
+	--]]
+	local reserved = WINDOW.DockStrip
+	local usable = Vector2.new(screen.X, math.max(screen.Y - reserved, 120))
+
 	AdminFrame.Size = UDim2.new(0, WINDOW.AdminW, 0, WINDOW.AdminH)
-	ScaleFor(AdminFrame, WINDOW.AdminW, WINDOW.AdminH, screen)
+	ScaleFor(AdminFrame, WINDOW.AdminW, WINDOW.AdminH, usable)
+	AdminFrame.Position = UDim2.new(0.5, 0, 0.5, math.floor(reserved / 2))
 
 	-- The report window is built much further down the file, so it is fetched
 	-- from the table rather than named directly: a bare `ReportFrame` here
@@ -1330,6 +1345,11 @@ local PageButtons = {}
 local PageBodies = {}
 local CurrentPage = nil
 
+-- Assigned with the input dock further down, which cannot be built until
+-- StyleInput and the theme exist. SelectPage runs before that, so it is
+-- declared here and called only once it has a value.
+local RefreshDock
+
 -- Status line along the bottom, shared by every page.
 local AdminStatus = AdminFrame:FindFirstChild("AdminStatus")
 if not AdminStatus then
@@ -1409,6 +1429,11 @@ local function SelectPage(name)
 	end
 
 	AdminTitle.Text = "Admin  -  " .. name
+
+	-- Not every page takes a value, so the dock follows the page.
+	if RefreshDock then
+		RefreshDock()
+	end
 
 	-- Ask for just this page's data, so tabbing around stays current without
 	-- resending everything every time.
@@ -1572,6 +1597,121 @@ local function MakeHeadshot(parent, name, userId, displayName)
 	return img
 end
 
+-------------------------------------------------------------------------------
+-- The input dock
+-------------------------------------------------------------------------------
+--[[
+	One text field for the whole panel, floating above it rather than living
+	inside it.
+
+	The panel is laid out in scale and shrunk by a UIScale to fit the window,
+	which is right for rows of buttons but wrong for a text field: the field
+	shrinks with everything else and the text inside it has a minimum size
+	below which it simply stops being readable. On a small window the boxes
+	ended up shorter than their own text.
+
+	So the field is pulled out and pinned to the top of the screen in FIXED
+	PIXELS. It never scales, so it is the same comfortable size at 1920x1080
+	and at 617x326, and it sits at a higher ZIndex than the panel so it works
+	even when the panel is filling the whole screen.
+
+	It also replaces two separate boxes - the Home page's message field and the
+	Players page's argument field - with one, because they always meant the
+	same thing: "the value for whatever I press next".
+--]]
+
+local DOCK = {Height = 40, Top = 10}
+
+local InputDock = ScreenGui:FindFirstChild("InputDock")
+if not InputDock then
+	InputDock = Instance.new("Frame")
+	InputDock.Name = "InputDock"
+	InputDock.Parent = ScreenGui
+end
+--[[
+	Fixed width, but never wider than the window. 520 fits comfortably from
+	1080p down to about 550px across; below that the offset alone would hang
+	off both edges, so the scale part takes over and it simply spans the screen
+	with a small inset.
+--]]
+InputDock.Size = UDim2.new(0, 520, 0, DOCK.Height)
+InputDock.SizeConstraint = Enum.SizeConstraint.RelativeXY
+
+do
+	local limit = InputDock:FindFirstChildOfClass("UISizeConstraint")
+	if not limit then
+		limit = Instance.new("UISizeConstraint")
+		limit.Parent = InputDock
+	end
+	DOCK.Limit = limit
+end
+InputDock.Position = UDim2.new(0.5, 0, 0, DOCK.Top)
+InputDock.AnchorPoint = Vector2.new(0.5, 0)
+InputDock.BackgroundColor3 = THEME.PanelBackground
+InputDock.BorderSizePixel = 0
+InputDock.Visible = false
+-- Above the panel (2) but below the toast banner (10).
+InputDock.ZIndex = 9
+GetOrMakeCorner(InputDock, SHOP_CORNER)
+StyleBorder(InputDock, THEME.ShopOutline, 4)
+AddSheen(InputDock)
+
+-- Says what the field is for right now, so one box serving several commands is
+-- never ambiguous.
+DOCK.Label = InputDock:FindFirstChild("Caption")
+if not DOCK.Label then
+	DOCK.Label = Instance.new("TextLabel")
+	DOCK.Label.Name = "Caption"
+	DOCK.Label.Parent = InputDock
+end
+DOCK.Label.Size = UDim2.new(0, 92, 1, 0)
+DOCK.Label.Position = UDim2.new(0, 12, 0, 0)
+DOCK.Label.BackgroundTransparency = 1
+DOCK.Label.Text = "Value"
+DOCK.Label.TextScaled = false
+DOCK.Label.TextSize = 14
+DOCK.Label.Font = TITLE_FONT
+DOCK.Label.TextColor3 = THEME.MutedText
+DOCK.Label.TextXAlignment = Enum.TextXAlignment.Left
+DOCK.Label.ZIndex = 10
+
+DOCK.Input = InputDock:FindFirstChild("Box")
+if not DOCK.Input then
+	DOCK.Input = Instance.new("TextBox")
+	DOCK.Input.Name = "Box"
+	DOCK.Input.Parent = InputDock
+end
+DOCK.Input.Size = UDim2.new(1, -116, 0, 28)
+DOCK.Input.Position = UDim2.new(0, 104, 0.5, 0)
+DOCK.Input.AnchorPoint = Vector2.new(0, 0.5)
+DOCK.Input.Text = ""
+DOCK.Input.PlaceholderText = "Reason, message, or a number.."
+DOCK.Input.ClearTextOnFocus = false
+DOCK.Input.Visible = true
+DOCK.Input.ZIndex = 10
+StyleInput(DOCK.Input)
+
+--[[
+	The dock only makes sense while the panel is open, and only on the pages
+	that actually take a value. Showing it on the Reports page, which has no
+	command that reads it, would just be a box that does nothing.
+--]]
+DOCK.Pages = {
+	Home = "Message / hour",
+	Players = "Reason / value",
+	Trolling = "Value",
+}
+
+function RefreshDock()
+	local caption = DOCK.Pages[CurrentPage or ""]
+	local wanted = AdminFrame.Visible and caption ~= nil
+
+	InputDock.Visible = wanted
+	if wanted then
+		DOCK.Label.Text = caption
+	end
+end
+
 -- Home -------------------------------------------------------------------------
 --[[
 	A landing page rather than a control panel: what your rank lets you do, a
@@ -1591,11 +1731,14 @@ local HomeBody = MakePageBody("Home")
 	going wrong, with the row heights edited in one place and the offsets in
 	another.
 --]]
+--[[
+	The Input band is gone: that field is the input dock now, pinned outside
+	the panel. Actions moves up into the space and keeps the same gaps.
+--]]
 local HOME_BANDS = {
 	Blurb = {0.015, 0.150},
 	Stats = {0.185, 0.230},
-	Input = {0.445, 0.105},
-	Actions = {0.580, 0.170},
+	Actions = {0.450, 0.190},
 }
 
 local function HomeBand(element, name)
@@ -1736,19 +1879,12 @@ do
 end
 
 -- The free text box the announce / time buttons read from.
-local HomeInput = HomeBody:FindFirstChild("Input")
-if not HomeInput then
-	HomeInput = TextBox:Clone()
-	HomeInput.Name = "Input"
-	HomeInput.Parent = HomeBody
-end
-HomeBand(HomeInput, "Input")
-HomeInput.Text = ""
-HomeInput.PlaceholderText = "Message, or a number for Set Time.."
-HomeInput.ClearTextOnFocus = false
-HomeInput.Visible = true
-HomeInput.ZIndex = 4
-StyleInput(HomeInput)
+--[[
+	No text field here any more. It lived in the panel, scaled with it, and
+	became unreadable on a small window; it is now the input dock pinned to the
+	top of the screen at a fixed pixel size. The band it used to occupy is
+	given back to the action buttons.
+--]]
 
 -- Players ----------------------------------------------------------------------
 --[[
@@ -1797,24 +1933,11 @@ SelectedLabel.TextXAlignment = Enum.TextXAlignment.Left
 SelectedLabel.ZIndex = 5
 
 -- Shared argument box: reasons, messages, speeds all come from here.
-local ActionInput = PlayerActions:FindFirstChild("Input")
-if not ActionInput then
-	ActionInput = TextBox:Clone()
-	ActionInput.Name = "Input"
-	ActionInput.Parent = PlayerActions
-end
-ActionInput.Size = UDim2.new(1, 0, 0.1, 0)
-ActionInput.Position = UDim2.new(0, 0, 0.12, 0)
-ActionInput.Text = ""
-ActionInput.PlaceholderText = "Reason / message / number.."
-ActionInput.ClearTextOnFocus = false
-ActionInput.Visible = true
-ActionInput.ZIndex = 5
-StyleInput(ActionInput)
+-- The argument field is the input dock now, so the button grid starts higher.
 
 Grids.Action = MakeScroller(
 	PlayerActions, "Grid",
-	UDim2.new(1, 0, 0.72, 0), UDim2.new(0, 0, 0.26, 0)
+	UDim2.new(1, 0, 0.84, 0), UDim2.new(0, 0, 0.14, 0)
 )
 Grids.Action.BackgroundTransparency = 1
 do
@@ -2845,10 +2968,8 @@ local function BuildCommandButtons(list)
 
 				-- Raw commands read the free text box even with nobody picked,
 				-- which is what makes /announce and /time work from the GUI.
-				local value = ActionInput.Text
-				if d.Raw and CurrentPage == "Home" then
-					value = HomeInput.Text
-				end
+				-- One field for every page now, so no choosing between two.
+				local value = DOCK.Input.Text
 				if value == "" and d.Default then
 					value = d.Default
 				end
@@ -2917,7 +3038,7 @@ local function BuildHomeButtons()
 					if not d then
 						return
 					end
-					local value = HomeInput.Text
+					local value = DOCK.Input.Text
 					if value == "" and d.Default then
 						value = d.Default
 					end
@@ -2954,6 +3075,7 @@ local function BuildHomeButtons()
 	end
 end
 
+
 -------------------------------------------------------------------------------
 -- Opening and closing
 -------------------------------------------------------------------------------
@@ -2965,6 +3087,7 @@ local function SetPanelOpen(open)
 
 	AdminFrame.Visible = open
 	HUD.Show(not open)
+	RefreshDock()
 
 	if open then
 		-- Everything is refetched on open, so a panel left shut for an hour
@@ -3542,6 +3665,7 @@ RemoteEvent.OnClientEvent:Connect(function(Argument, Argument2, Argument3, Argum
 
 	elseif Argument == "AdminClose" then
 		HUD.Show(true)
+		InputDock.Visible = false
 		-- Sent when someone is demoted while they have the panel open.
 		IsAdminClient = false
 		MyRank = 0

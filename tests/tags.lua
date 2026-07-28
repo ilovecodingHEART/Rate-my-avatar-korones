@@ -547,6 +547,102 @@ test("single line inputs do not wrap, the report note does", function(H)
 	end
 end)
 
+-------------------------------------------------------------------------------
+-- The input dock
+-------------------------------------------------------------------------------
+
+test("the input field lives outside the panel at a fixed size", function(H)
+	--[[
+		The panel is laid out in scale and shrunk by a UIScale, which is right
+		for rows of buttons and wrong for a text field: the field shrank with
+		everything else until the text stopped being readable.
+
+		So the field is pinned to the top of the screen in fixed pixels and
+		never scales. This checks it is genuinely outside the panel, since a
+		field nested inside would inherit the UIScale again and undo the point.
+	--]]
+	local admin = H.addPlayer("qzc", 78857)
+	H.drain()
+	H.runClient(admin)
+
+	local gui = H.clientGui
+	local dock = H.findIn(gui, "InputDock")
+	ok(dock ~= nil, "the dock exists")
+
+	eq(dock.Parent, gui, "it is a sibling of the panel, not inside it")
+
+	-- Fixed pixels: no scale component at all.
+	eq(dock.Size.Y.Scale, 0, "its height is pure pixels")
+	ok(dock.Size.Y.Offset >= 32, "and big enough to hold a readable field")
+
+	-- It has to draw over the panel, which fills the screen on a small window.
+	local panel = H.findIn(gui, "AdminFrame")
+	ok(dock.ZIndex > panel.ZIndex, "it draws above the panel")
+
+	local box = dock:FindFirstChild("Box")
+	ok(box ~= nil, "the field is in there")
+	eq(box.TextScaled, false, "and does not scale its text")
+end)
+
+test("the dock only shows on pages that take a value", function(H)
+	local admin = H.addPlayer("qzc", 78857)
+	H.drain()
+	H.runClient(admin)
+
+	local gui = H.clientGui
+	local dock = H.findIn(gui, "InputDock")
+
+	eq(dock.Visible, false, "hidden while the panel is shut")
+
+	H.remote.OnClientEvent:Fire("AdminAccess", true, 3, "Developer")
+	H.findIn(gui, "AdminButton").MouseButton1Click:Fire()
+	H.drain()
+	eq(dock.Visible, true, "shown on Home, which takes a message")
+
+	-- Reports has no command that reads a value, so a box there would do
+	-- nothing but confuse.
+	H.findIn(gui, "Nav_Reports").MouseButton1Click:Fire()
+	H.drain()
+	eq(dock.Visible, false, "hidden on Reports")
+
+	H.findIn(gui, "Nav_Players").MouseButton1Click:Fire()
+	H.drain()
+	eq(dock.Visible, true, "shown again on Players")
+
+	H.findIn(gui, "AdminClose").MouseButton1Click:Fire()
+	eq(dock.Visible, false, "and gone with the panel")
+end)
+
+test("one field feeds every page", function(H)
+	--[[
+		Home and Players used to have separate boxes that always meant the same
+		thing. Typing on one page and pressing a button on another now works,
+		because there is only one field.
+	--]]
+	local owner = H.addPlayer("thugshaker", 49603)
+	local alice = H.addPlayer("alice", 1001)
+	H.drain()
+	H.runClient(owner)
+
+	H.asPlayer(owner, "AdminOpen")
+	H.drain()
+
+	local gui = H.clientGui
+	H.findIn(gui, "InputDock").Box.Text = "typed on one page"
+
+	-- Announce is a Home command; kick is a Players one. Both read the dock.
+	H.findIn(gui, "H_announce").MouseButton1Click:Fire()
+	local said = H.lastSent(alice, "Announce")
+	ok(said ~= nil, "announce went out")
+	eq(said[3], "typed on one page", "with what was typed")
+
+	H.findIn(gui, "P_1001").MouseButton1Click:Fire()
+	H.findIn(gui, "C_kick").MouseButton1Click:Fire()
+	eq(#H.mock.kicks, 1, "and the kick used the same field")
+	ok(string.find(H.mock.kicks[1].Reason, "typed on one page") ~= nil,
+		"as its reason")
+end)
+
 test("every HUD button is built the same way", function(H)
 	--[[
 		ShopButton was a clone of ToggleButton, so it drew its caption through

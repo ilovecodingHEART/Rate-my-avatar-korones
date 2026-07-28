@@ -1001,9 +1001,11 @@ test("the whole round trip works: client button to server action", function(H)
 	local gui = H.clientGui
 	ok(H.findIn(gui, "C_kick") ~= nil, "the kick button was built from the server's list")
 
-	-- Pick alice in the list, then press Kick.
+	-- Pick alice in the list, type the reason into the dock, press Kick.
+	-- The dock is a sibling of the panel rather than inside it, so it is found
+	-- from the ScreenGui.
 	H.findIn(gui, "P_1001").MouseButton1Click:Fire()
-	H.findIn(gui, "Input").Text = "round trip"
+	H.findIn(gui, "InputDock").Box.Text = "round trip"
 	H.findIn(gui, "C_kick").MouseButton1Click:Fire()
 
 	eq(#H.mock.kicks, 1, "the server kicked her")

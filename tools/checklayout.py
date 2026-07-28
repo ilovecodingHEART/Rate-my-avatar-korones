@@ -35,8 +35,20 @@ UDIM2 = re.compile(
 )
 VECTOR2 = re.compile(r"Vector2\.new\(\s*([-\d.]+)\s*,\s*([-\d.]+)\s*\)")
 
-# Anything shorter than this cannot show a line of text without clipping.
+#[[
+#   Two different floors, because two different things are being checked.
+#
+#   A widget with TextScaled = true grows or shrinks its font to fit, so the
+#   row height IS the text height: 18px is small but perfectly legible, and
+#   nothing clips. A widget with a FIXED TextSize does clip, because the glyphs
+#   stay their stated size no matter how short the row gets.
+#
+#   Holding both to 22 was wrong in the strict direction - it reported clipping
+#   on scaled rows that render fine - which is just as unhelpful as missing a
+#   real one, because warnings nobody can act on get ignored.
+#]]
 MIN_TEXT_HEIGHT = 22
+MIN_SCALED_HEIGHT = 15
 
 #[[
 #   Which widget lives inside which, and which siblings are laid out by hand
@@ -53,7 +65,8 @@ PANEL = {
 }
 
 PAGES = {
-    "Home": ["HomeBlurb", "HomeStats", "HomeInput", "HomeActions"],
+    # HomeInput is gone: that field is the input dock, outside the panel.
+    "Home": ["HomeBlurb", "HomeStats", "HomeActions"],
     "Players": ["PlayerList", "PlayerActions"],
     "Reports": ["ReportList"],
     "Staff": ["StaffList", "StaffSide"],
@@ -71,7 +84,7 @@ PAGES = {
 SQUARE = ["GreetImage"]
 
 NESTED = {
-    "PlayerActions": ["SelectedLabel", "ActionInput", "ActionGrid"],
+    "PlayerActions": ["SelectedLabel", "ActionGrid"],
     "TrollSide": ["TrollGrid"],
     "StaffSide": [
         "AddTitle", "AddHint", "StaffIdBox", "StaffNameBox",
@@ -291,14 +304,26 @@ def check(path, verbose=True):
     #]]
     design = min_panel_size(src)
     min_scale = named_number(src, "MinScale") or 1.0
+    # The panel fits the screen minus the strip the input dock reserves at the
+    # top, and is nudged down by half of it. Modelling the full screen here
+    # would miss the dock landing on the panel's title.
+    dock_strip = named_number(src, "DockStrip") or 0
 
     scale = 1.0
     if design:
         fw, fh = design
-        fit = min((SCREEN_W - 16) / fw, (SCREEN_H - 16) / fh, 1.0)
+        usable_h = max(SCREEN_H - dock_strip, 120)
+        fit = min((SCREEN_W - 16) / fw, (usable_h - 16) / fh, 1.0)
+        #[[
+        #   The rect stays at the DESIGN size and the scale is reported
+        #   separately, because everything inside is measured against the
+        #   design size and then scaled as one piece. Baking the scale into
+        #   fw/fh here and then leaving `scale` at 1.0 made the children get it
+        #   applied twice, which reported false clipping everywhere.
+        #]]
         scale = max(fit, min_scale)
-        fx = SCREEN_W / 2 - fw / 2
-        fy = SCREEN_H / 2 - fh / 2
+        fx = SCREEN_W / 2 - (fw * scale) / 2
+        fy = SCREEN_H / 2 + dock_strip / 2 - (fh * scale) / 2
         frame_rect = (fx, fy, fw, fh)
 
     fx, fy, fw, fh = frame_rect
@@ -338,7 +363,23 @@ def check(path, verbose=True):
             # Everything is laid out at the design size then scaled as one
             # piece, so readability depends on the height AFTER scaling.
             drawn = r[3] * globals().get("TEXT_SCALE", 1.0)
-            if 0 < drawn < MIN_TEXT_HEIGHT:
+
+            # TextScaled rows fit their own text, so they only need to stay
+            # legible; fixed-size rows have to fit the size they declared.
+            #[[
+            #   Either set directly on the widget, or by the helper that built
+            #   it. MakeSmallButton sets TextScaled on everything it makes, so
+            #   matching only `Name.TextScaled = true` missed those and
+            #   reported clipping on buttons that scale their text fine.
+            #]]
+            scaled = re.search(
+                r"^\s*%s\.TextScaled\s*=\s*true" % re.escape(name), src, re.M)
+            if not scaled and re.search(
+                    r"local\s+%s\s*=\s*MakeSmallButton" % re.escape(name), src):
+                scaled = True
+            floor = MIN_SCALED_HEIGHT if scaled else MIN_TEXT_HEIGHT
+
+            if 0 < drawn < floor:
                 problems.append(
                     "%s: %s is %.0fpx tall on screen, text will clip (line %d)"
                     % (label, name, drawn, b.line)

@@ -64,12 +64,21 @@ def draw(path, page, out_path, screen=None):
 
     frame = parse_block(src, "AdminFrame", consts)
     if design:
-        # Laid out at the design size, then scaled to fit, same as the client.
+        #[[
+        #   Same maths as the client and the checker: fit the design size into
+        #   the screen MINUS the strip the input dock reserves at the top, then
+        #   nudge down by half of it. This used to duplicate an older version
+        #   without the strip, so the preview drew the panel under the dock and
+        #   disagreed with the checker sitting next to it.
+        #]]
+        strip = named_number(src, "DockStrip") or 0
         dw, dh = design
-        fit = min((SCREEN_W - 16) / dw, (SCREEN_H - 16) / dh, 1.0)
+        usable_h = max(SCREEN_H - strip, 120)
+        fit = min((SCREEN_W - 16) / dw, (usable_h - 16) / dh, 1.0)
         sc = max(fit, minscale)
         fw, fh = dw * sc, dh * sc
-        fx, fy = SCREEN_W / 2 - fw / 2, SCREEN_H / 2 - fh / 2
+        fx = SCREEN_W / 2 - fw / 2
+        fy = SCREEN_H / 2 + strip / 2 - fh / 2
         frect = (fx, fy, fw, fh)
     else:
         frect = frame.rect(SCREEN_W, SCREEN_H, 0, 0)
@@ -126,7 +135,6 @@ def draw(path, page, out_path, screen=None):
     labels = {
         "HomeBlurb": "You are Admin. Every button here has a chat command..",
         "HomeStats": "",
-        "HomeInput": "Message, or a number for Set Time..",
         "HomeActions": "",
         "PlayerList": "player list",
         "PlayerActions": "",
@@ -203,6 +211,19 @@ def draw(path, page, out_path, screen=None):
         by = base - step * i
         box((bx, by, bw, bh), bg)
         d.text((bx + 8, by + bh / 2 - 6), cap, fill=text)
+
+    # The input dock, pinned outside the panel in fixed pixels.
+    from checklayout import named_number
+    dh = named_number(src, "Height") or 40
+    dtop = named_number(src, "Top") or 10
+    import checklayout
+    screen_w = checklayout.SCREEN_W
+    dw = min(520, screen_w - 24)
+    dx = screen_w / 2 - dw / 2
+    box((dx, dtop, dw, dh), bg, None, width=4)
+    d.text((dx + 12, dtop + dh / 2 - 6), "Message / hour", fill=muted)
+    box((dx + 104, dtop + dh / 2 - 14, dw - 116, 28), T.get("InputBackground", (24, 25, 29)))
+    d.text((dx + 114, dtop + dh / 2 - 6), "Reason, message, or a number..", fill=muted)
 
     img.save(out_path)
     print("wrote " + out_path)
