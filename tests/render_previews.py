@@ -30,7 +30,8 @@ ORDER=[x.strip().strip('"') for x in re.search(r'SHOP_ORDER = \{([^}]+)\}', SERV
 PASSES.sort(key=lambda p: ORDER.index(p['key']))
 
 TOTAL=int(re.search(r'TOTAL_ASSETS = (\d+)', LOADER).group(1))
-LTITLE=re.search(r'TITLE = "([^"]+)"', LOADER).group(1)
+LTITLE=re.search(r'^local TITLE = "([^"]+)"', LOADER, re.M).group(1)
+LSUB=re.search(r'^local SUBTITLE = "([^"]*)"', LOADER, re.M).group(1)
 
 S=3
 def font(px, bold=False):
@@ -206,21 +207,41 @@ def shop(path, owned_keys, tab=None):
     return path
 
 # ------------------------------------------------------------------ loading
-def loading(path, pct=0.62):
+def loading(path, pct=0.62, spin=20):
+    import math
     W,H=760*S,428*S
-    img=Image.new('RGB',(W,H),LT['PanelBackground']); d=ImageDraw.Draw(img)
-    ctext(d,(0,int(0.30*H),W,int(0.42*H)),LTITLE,font(int(0.075*H),True),LT['Text'])
-    bw,bh=0.46*W,0.022*H
-    bx0,by0=(W-bw)/2,0.52*H-bh/2
-    bb=(bx0,by0,bx0+bw,by0+bh)
-    d.rounded_rectangle(bb,radius=int(bh/2),fill=LT['BarBackground'],outline=LT['PanelStroke'],width=2*S)
+    img=Image.new('RGB',(W,H),LT['Background']); d=ImageDraw.Draw(img)
+
+    # title + subtitle, centred, thin type
+    ctext(d,(0,int(0.555*H),W,int(0.625*H)),LTITLE,font(int(0.058*H)),LT['Title'])
+    ctext(d,(0,int(0.632*H),W,int(0.672*H)),LSUB,font(int(0.030*H)),LT['Subtitle'])
+
+    # thin progress bar
+    bw,bh=0.30*W,max(0.006*H,3*S)
+    bx0,by0=(W-bw)/2,0.712*H
+    d.rounded_rectangle((bx0,by0,bx0+bw,by0+bh),radius=int(bh/2),fill=LT['BarBackground'])
     eased=1-(1-pct)*(1-pct)
     fw=bw*eased
     if fw>bh:
         d.rounded_rectangle((bx0,by0,bx0+fw,by0+bh),radius=int(bh/2),fill=LT['BarFill'])
+
     shown=int(eased*TOTAL)
-    ctext(d,(0,int(0.555*H),W,int(0.605*H)),
-          "Loading assets.. %d / %d"%(shown,TOTAL),font(int(0.032*H)),LT['MutedText'])
+    ctext(d,(0,int(0.755*H),W,int(0.80*H)),
+          "Loading assets.. %d / %d"%(shown,TOTAL),font(int(0.026*H)),LT['Counter'])
+
+    # spinning cube, bottom right
+    cs=int(0.075*H)
+    cx,cy=int(0.90*W),int(0.80*H)
+    cube=Image.new('RGBA',(cs*3,cs*3),(0,0,0,0))
+    cd=ImageDraw.Draw(cube)
+    o=cs
+    cd.rounded_rectangle((o,o,o+cs,o+cs),radius=int(cs*0.16),fill=LT['Cube'])
+    hs=int(cs*0.34)
+    hx=o+(cs-hs)//2
+    cd.rounded_rectangle((hx,hx,hx+hs,hx+hs),radius=int(hs*0.12),fill=LT['Background'])
+    cube=cube.rotate(-spin,resample=Image.BICUBIC,center=(o+cs/2,o+cs/2))
+    img.paste(cube,(cx-int(o+cs/2),cy-int(o+cs/2)),cube)
+
     img.resize((W//S,H//S),Image.LANCZOS).save(path)
     return path
 
@@ -264,6 +285,7 @@ made=[
  shop(os.path.join(OUT,'gui-shop-items-tab.png'), set(), tab=CATS[1] if len(CATS)>1 else CATS[0]),
  hud(os.path.join(OUT,'gui-hud.png')),
  loading(os.path.join(OUT,'gui-loading.png')),
+ loading(os.path.join(OUT,'gui-loading-spin.png'), pct=0.28, spin=58),
  boombox(os.path.join(OUT,'gui-boombox.png')),
 ]
 for m in made: print("wrote", os.path.relpath(m, ROOT))

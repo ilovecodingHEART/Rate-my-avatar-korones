@@ -17,10 +17,31 @@ Original booth system by **ywinfe** and **thugshaker**.
 
 ### Loading screen
 
-Counts to 10,000 in ~5 seconds, then fades out. Time-driven, so it always takes
-5 seconds regardless of framerate.
+Styled after the stock Roblox loader: flat dark grey, thin light type, and a
+cube spinning in the bottom right. Counts to 10,000 in ~5 seconds then fades
+out. Time-driven, so it always takes 5 seconds regardless of framerate.
 
 ![Loading screen](docs/gui-loading.png)
+
+The cube spins continuously while the bar fills:
+
+![Loading screen, cube rotated](docs/gui-loading-spin.png)
+
+#### Swapping in your own logo
+
+Top of `LoadingScreen.client.lua`:
+
+```lua
+local LOGO_IMAGE = "rbxassetid://123456789"   -- replaces the text title
+local CUBE_IMAGE = "rbxassetid://123456789"   -- replaces the white cube
+```
+
+Leave either as `""` to keep the default. With `LOGO_IMAGE` set the text title
+hides itself automatically.
+
+The fonts are `SourceSans` / `SourceSansLight`, the same thin faces the real
+Roblox loader uses. `SHOW_BAR = false` removes the progress bar for a pure
+stock look.
 
 ### Booth menu — locked
 
