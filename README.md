@@ -195,6 +195,17 @@ Guarded against: no reporting your own booth, no reporting an unclaimed booth,
 one open report per booth per person, a per player cooldown, and a cap on the
 queue.
 
+### Handing the report code to someone else
+
+`docs/report-system.lua` is the whole report system pulled out of the server
+script into one readable file, with the two places a webhook would hook into
+marked. It is a reference copy, not loaded by the place, so it can drift - the
+live code is `src/Server.server.lua`.
+
+It also writes down the things that catch people out: Discord blocks Roblox
+server IPs so a relay is needed, `PostAsync` yields and must not be called
+inline, and the note is already filtered by the time it reaches you.
+
 ## Avatar images
 
 Headshots come from the thumbnails API. Requesting the site directly from
