@@ -66,6 +66,14 @@ function H.installGlobals()
 	local function vec3(x, y, z)
 		return setmetatable({X = x or 0, Y = y or 0, Z = z or 0}, Vector3_mt)
 	end
+	-- Real Vector3s add, and code that positions things relative to a player
+	-- leans on it, so the mock has to as well.
+	Vector3_mt.__add = function(a, b)
+		return vec3((a.X or 0) + (b.X or 0), (a.Y or 0) + (b.Y or 0), (a.Z or 0) + (b.Z or 0))
+	end
+	Vector3_mt.__sub = function(a, b)
+		return vec3((a.X or 0) - (b.X or 0), (a.Y or 0) - (b.Y or 0), (a.Z or 0) - (b.Z or 0))
+	end
 	_G.Vector3 = {new = vec3}
 
 	local CFrame_mt = {}
@@ -397,6 +405,7 @@ function H.buildCharacter(player)
 	hum.Parent = char
 	local root = Instance_new("Part", "HumanoidRootPart")
 	root.CFrame = _G.CFrame.new(0, 0, 0)
+	root.Position = _G.Vector3.new(0, 0, 0)
 	root.Anchored = false
 	root.Parent = char
 	local head = Instance_new("Part", "Head")

@@ -999,6 +999,7 @@ end)
 -- Kept in their own file so this one stays readable; they share the runner and
 -- the assertion helpers.
 dofile(TESTS .. "/commands.lua")(test, ok, eq)
+dofile(TESTS .. "/tags.lua")(test, ok, eq)
 
 -------------------------------------------------------------------------------
 -- Runner

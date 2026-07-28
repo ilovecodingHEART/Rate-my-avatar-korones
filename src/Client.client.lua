@@ -1009,6 +1009,7 @@ local PAGES = {
 	{Name = "Reports", MinRank = RANK_MOD},
 	{Name = "Staff", MinRank = RANK_ADMIN},
 	{Name = "Shop", MinRank = RANK_ADMIN},
+	{Name = "Trolling", MinRank = RANK_ADMIN},
 }
 
 local PageNav = AdminFrame:FindFirstChild("PageNav")
@@ -1029,7 +1030,7 @@ do
 		navLayout.Parent = PageNav
 	end
 	navLayout.SortOrder = Enum.SortOrder.LayoutOrder
-	navLayout.Padding = UDim.new(0.03, 0)
+	navLayout.Padding = UDim.new(0.025, 0)
 	navLayout.HorizontalAlignment = Enum.HorizontalAlignment.Center
 end
 
@@ -1150,7 +1151,7 @@ local function BuildNav()
 		end
 
 		button.LayoutOrder = i
-		button.Size = UDim2.new(0.94, 0, 0.165, 0)
+		button.Size = UDim2.new(0.94, 0, 0.14, 0)
 		button.Text = page.Name
 		button.TextScaled = true
 		button.Font = TITLE_FONT
@@ -1597,10 +1598,25 @@ local function RefreshActionButtons()
 	end
 end
 
+--[[
+	The Players page and the Trolling page show the same people and share one
+	selection, so both lists have to highlight together. TrollRows is filled in
+	further down; until then it is simply empty and the loop does nothing.
+--]]
+local TrollRows = {}
+
 local function SelectPlayer(userId)
 	SelectedUserId = userId
 
 	for id, row in pairs(PlayerRows) do
+		if id == userId then
+			row.BackgroundColor3 = THEME.TabActive
+		else
+			row.BackgroundColor3 = THEME.TabIdle
+		end
+	end
+
+	for id, row in pairs(TrollRows) do
 		if id == userId then
 			row.BackgroundColor3 = THEME.TabActive
 		else
@@ -1955,20 +1971,20 @@ StaffNameBox.Visible = true
 StaffNameBox.ZIndex = 5
 StyleInput(StaffNameBox)
 
-local MakeModButton = MakeSmallButton(StaffSide, "MakeMod", "Add as Mod",
-	THEME.ButtonBackground, THEME.ModBadge)
-MakeModButton.Size = UDim2.new(0.48, 0, 0.11, 0)
-MakeModButton.Position = UDim2.new(0, 0, 0.50, 0)
-
-local MakeAdminButton = MakeSmallButton(StaffSide, "MakeAdmin", "Add as Admin",
-	THEME.ButtonBackground, THEME.AdminBadge)
-MakeAdminButton.Size = UDim2.new(0.48, 0, 0.11, 0)
-MakeAdminButton.Position = UDim2.new(0.52, 0, 0.50, 0)
-
-local RemoveStaffButton = MakeSmallButton(StaffSide, "RemoveStaff", "Remove from staff",
-	THEME.DangerBackground, THEME.DangerText)
-RemoveStaffButton.Size = UDim2.new(1, 0, 0.11, 0)
-RemoveStaffButton.Position = UDim2.new(0, 0, 0.63, 0)
+--[[
+	The three whitelist buttons. Built and wired in one pass, partly to keep
+	them together and partly because this file sits close to Lua's 200 local
+	ceiling and three more names at the top level is three it cannot spare.
+	SubmitRank is declared below and captured by the handlers.
+--]]
+local StaffRankButtons = {
+	{"MakeMod", "Add as Mod", THEME.ButtonBackground, THEME.ModBadge,
+		UDim2.new(0.48, 0, 0.11, 0), UDim2.new(0, 0, 0.50, 0), RANK_MOD},
+	{"MakeAdmin", "Add as Admin", THEME.ButtonBackground, THEME.AdminBadge,
+		UDim2.new(0.48, 0, 0.11, 0), UDim2.new(0.52, 0, 0.50, 0), RANK_ADMIN},
+	{"RemoveStaff", "Remove from staff", THEME.DangerBackground, THEME.DangerText,
+		UDim2.new(1, 0, 0.11, 0), UDim2.new(0, 0, 0.63, 0), 0},
+}
 
 do
 	local BanTitle = StaffSide:FindFirstChild("BanTitle")
@@ -2130,17 +2146,137 @@ local function SubmitRank(rank)
 	})
 end
 
-MakeModButton.MouseButton1Click:Connect(function()
-	SubmitRank(RANK_MOD)
-end)
+for _, spec in ipairs(StaffRankButtons) do
+	local button = MakeSmallButton(StaffSide, spec[1], spec[2], spec[3], spec[4])
+	button.Size = spec[5]
+	button.Position = spec[6]
+	button.MouseButton1Click:Connect(function()
+		SubmitRank(spec[7])
+	end)
+end
 
-MakeAdminButton.MouseButton1Click:Connect(function()
-	SubmitRank(RANK_ADMIN)
-end)
+-- Trolling ---------------------------------------------------------------------
+--[[
+	The same shape as the Players page, on purpose: pick somebody on the left,
+	press a thing on the right.
 
-RemoveStaffButton.MouseButton1Click:Connect(function()
-	SubmitRank(0)
-end)
+	It shares the Players page's selection rather than keeping its own, so
+	whoever you had highlighted is still highlighted when you tab over, and
+	there is only ever one "who is selected" to reason about.
+
+	Every button here is reversible and none of them can end somebody's
+	session. Cleanup puts a person fully back to normal, and the disco stops on
+	its own so it cannot be left running by someone who logs off.
+--]]
+
+local TrollBody = MakePageBody("Trolling")
+
+local TrollList = MakeScroller(
+	TrollBody, "TrollList",
+	UDim2.new(0.40, 0, 0.96, 0), UDim2.new(0, 0, 0.02, 0)
+)
+
+local TrollSide = TrollBody:FindFirstChild("Side")
+if not TrollSide then
+	TrollSide = Instance.new("Frame")
+	TrollSide.Name = "Side"
+	TrollSide.Parent = TrollBody
+end
+TrollSide.Size = UDim2.new(0.575, 0, 0.96, 0)
+TrollSide.Position = UDim2.new(0.425, 0, 0.02, 0)
+TrollSide.BackgroundTransparency = 1
+TrollSide.ZIndex = 4
+
+do
+	local TrollNote = TrollSide:FindFirstChild("Note")
+	if not TrollNote then
+		TrollNote = Instance.new("TextLabel")
+		TrollNote.Name = "Note"
+		TrollNote.Parent = TrollSide
+	end
+	TrollNote.Size = UDim2.new(1, 0, 0.11, 0)
+	TrollNote.BackgroundTransparency = 1
+	TrollNote.Text = "Pick someone on the left. Cleanup undoes all of it."
+	TrollNote.TextScaled = false
+	TrollNote.TextSize = 13
+	TrollNote.TextWrapped = true
+	TrollNote.Font = BODY_FONT
+	TrollNote.TextColor3 = THEME.MutedText
+	TrollNote.TextXAlignment = Enum.TextXAlignment.Left
+	TrollNote.ZIndex = 5
+end
+
+local TrollGrid = MakeScroller(
+	TrollSide, "Grid",
+	UDim2.new(1, 0, 0.87, 0), UDim2.new(0, 0, 0.13, 0)
+)
+TrollGrid.BackgroundTransparency = 1
+do
+	local st = TrollGrid:FindFirstChildOfClass("UIStroke")
+	if st then
+		st.Transparency = 1
+	end
+	local old = TrollGrid:FindFirstChildOfClass("UIListLayout")
+	if old then
+		old:Destroy()
+	end
+	local grid = TrollGrid:FindFirstChildOfClass("UIGridLayout")
+	if not grid then
+		grid = Instance.new("UIGridLayout")
+		grid.Parent = TrollGrid
+	end
+	grid.CellSize = UDim2.new(0.31, 0, 0, 34)
+	grid.CellPadding = UDim2.new(0.025, 0, 0, 6)
+	grid.SortOrder = Enum.SortOrder.LayoutOrder
+end
+
+-- Rows here mirror the Players page. TrollRows itself is declared up with
+-- SelectPlayer, which needs it to highlight both lists at once.
+local function BuildTrollRow(entry, order)
+	local row = TrollRows[entry.UserId]
+	if not row then
+		row = Instance.new("TextButton")
+		row.Name = "T_" .. tostring(entry.UserId)
+		row.Parent = TrollList
+		row.Text = ""
+		row.MouseButton1Click:Connect(function()
+			SelectPlayer(entry.UserId)
+		end)
+		TrollRows[entry.UserId] = row
+	end
+
+	row.LayoutOrder = order
+	row.Size = UDim2.new(0.94, 0, 0, 40)
+	row.BackgroundColor3 = (SelectedUserId == entry.UserId) and THEME.TabActive or THEME.TabIdle
+	row.BorderSizePixel = 0
+	row.AutoButtonColor = true
+	row.ZIndex = 4
+	GetOrMakeCorner(row, CONTROL_CORNER)
+	StyleBorder(row, THEME.ShopOutline, 2)
+
+	local head = MakeHeadshot(row, "Head", entry.UserId, entry.Name)
+	head.Size = UDim2.new(0, 30, 0, 30)
+	head.Position = UDim2.new(0, 6, 0.5, 0)
+	head.AnchorPoint = Vector2.new(0, 0.5)
+
+	local nameLabel = row:FindFirstChild("TName")
+	if not nameLabel then
+		nameLabel = Instance.new("TextLabel")
+		nameLabel.Name = "TName"
+		nameLabel.Parent = row
+	end
+	nameLabel.Size = UDim2.new(0.7, 0, 0.7, 0)
+	nameLabel.Position = UDim2.new(0, 42, 0.15, 0)
+	nameLabel.BackgroundTransparency = 1
+	nameLabel.Text = entry.Name
+	nameLabel.TextScaled = true
+	nameLabel.Font = TITLE_FONT
+	nameLabel.TextColor3 = RankColour(entry.Rank)
+	nameLabel.TextXAlignment = Enum.TextXAlignment.Left
+	nameLabel.ZIndex = 5
+
+	return row
+end
 
 -- Shop -------------------------------------------------------------------------
 --[[
@@ -2392,11 +2528,15 @@ local function BuildCommandButtons(list)
 		CommandDefs[def.Name] = def
 		seen[def.Name] = true
 
+		-- Troll commands live on their own page, so a mis-click on the
+		-- moderation page cannot set somebody on fire instead of warning them.
+		local host = def.Troll and TrollGrid or ActionGrid
+
 		local button = CommandButtons[def.Name]
 		if not button then
 			button = Instance.new("TextButton")
 			button.Name = "C_" .. def.Name
-			button.Parent = ActionGrid
+			button.Parent = host
 			CommandButtons[def.Name] = button
 
 			button.MouseButton1Click:Connect(function()
@@ -2450,6 +2590,9 @@ local function BuildCommandButtons(list)
 		if def.Danger then
 			button.BackgroundColor3 = THEME.DangerBackground
 			button.TextColor3 = THEME.DangerText
+		elseif def.Troll then
+			button.BackgroundColor3 = THEME.AdminBackground
+			button.TextColor3 = THEME.AdminText
 		else
 			button.BackgroundColor3 = THEME.ButtonBackground
 			button.TextColor3 = THEME.Text
@@ -2726,10 +2869,19 @@ ReportStatus.Font = BODY_FONT
 ReportStatus.TextColor3 = THEME.MutedText
 ReportStatus.ZIndex = 3
 
-local ReportBoothRows = {}
-local ReasonRows = {}
-local PickedBooth = nil
-local PickedReason = nil
+--[[
+	The report window's own state, kept in one table.
+
+	Grouped rather than four separate locals because this file runs close to
+	Lua's 200 local ceiling, and these are always read and written together
+	anyway, so a single name is no harder to follow.
+--]]
+local Picker = {
+	BoothRows = {},
+	ReasonRows = {},
+	Booth = nil,
+	Reason = nil,
+}
 
 local function SetReportStatus(msg, bad)
 	ReportStatus.Text = msg or ""
@@ -2741,23 +2893,23 @@ local function SetReportStatus(msg, bad)
 end
 
 local function RefreshPicks()
-	for booth, row in pairs(ReportBoothRows) do
-		row.BackgroundColor3 = (booth == PickedBooth) and THEME.TabActive or THEME.TabIdle
+	for booth, row in pairs(Picker.BoothRows) do
+		row.BackgroundColor3 = (booth == Picker.Booth) and THEME.TabActive or THEME.TabIdle
 	end
-	for reason, row in pairs(ReasonRows) do
-		row.BackgroundColor3 = (reason == PickedReason) and THEME.TabActive or THEME.TabIdle
+	for reason, row in pairs(Picker.ReasonRows) do
+		row.BackgroundColor3 = (reason == Picker.Reason) and THEME.TabActive or THEME.TabIdle
 	end
 end
 
 local function BuildBoothRow(entry, order)
-	local row = ReportBoothRows[entry.Booth]
+	local row = Picker.BoothRows[entry.Booth]
 	if not row then
 		row = Instance.new("TextButton")
 		row.Name = "RB_" .. tostring(entry.Booth)
 		row.Parent = BoothPick
-		ReportBoothRows[entry.Booth] = row
+		Picker.BoothRows[entry.Booth] = row
 		row.MouseButton1Click:Connect(function()
-			PickedBooth = entry.Booth
+			Picker.Booth = entry.Booth
 			RefreshPicks()
 		end)
 	end
@@ -2778,14 +2930,14 @@ local function BuildBoothRow(entry, order)
 end
 
 local function BuildReasonRow(reason, order)
-	local row = ReasonRows[reason]
+	local row = Picker.ReasonRows[reason]
 	if not row then
 		row = Instance.new("TextButton")
 		row.Name = "RR_" .. tostring(order)
 		row.Parent = ReasonPick
-		ReasonRows[reason] = row
+		Picker.ReasonRows[reason] = row
 		row.MouseButton1Click:Connect(function()
-			PickedReason = reason
+			Picker.Reason = reason
 			RefreshPicks()
 		end)
 	end
@@ -2818,18 +2970,18 @@ ReportClose.MouseButton1Click:Connect(function()
 end)
 
 SendReport.MouseButton1Click:Connect(function()
-	if not PickedBooth then
+	if not Picker.Booth then
 		SetReportStatus("Pick which booth first.", true)
 		return
 	end
-	if not PickedReason then
+	if not Picker.Reason then
 		SetReportStatus("Pick a reason.", true)
 		return
 	end
 
 	RemoteEvent:FireServer("ReportBooth", {
-		Booth = PickedBooth,
-		Reason = PickedReason,
+		Booth = Picker.Booth,
+		Reason = Picker.Reason,
 		Note = ReportNote.Text,
 	})
 	SetReportStatus("Sending..", false)
@@ -3145,6 +3297,7 @@ RemoteEvent.OnClientEvent:Connect(function(Argument, Argument2, Argument3, Argum
 				end
 				PlayerEntries[entry.UserId] = entry
 				BuildPlayerRow(entry, i)
+				BuildTrollRow(entry, i)
 				seen[entry.UserId] = true
 				if entry.Booth then
 					claimed = claimed + 1
@@ -3160,6 +3313,13 @@ RemoteEvent.OnClientEvent:Connect(function(Argument, Argument2, Argument3, Argum
 					if SelectedUserId == userId then
 						SelectedUserId = nil
 					end
+				end
+			end
+
+			for userId, row in pairs(TrollRows) do
+				if not seen[userId] then
+					row:Destroy()
+					TrollRows[userId] = nil
 				end
 			end
 
@@ -3280,18 +3440,28 @@ RemoteEvent.OnClientEvent:Connect(function(Argument, Argument2, Argument3, Argum
 				BuildBoothRow(entry, i)
 				seen[entry.Booth] = true
 			end
-			for booth, row in pairs(ReportBoothRows) do
+			for booth, row in pairs(Picker.BoothRows) do
 				if not seen[booth] then
 					row:Destroy()
-					ReportBoothRows[booth] = nil
-					if PickedBooth == booth then
-						PickedBooth = nil
+					Picker.BoothRows[booth] = nil
+					if Picker.Booth == booth then
+						Picker.Booth = nil
 					end
 				end
 			end
 
 			if #Argument2 == 0 then
-				SetReportStatus("No claimed booths to report right now.", false)
+				-- Argument4 is how many booths are claimed in total, including
+				-- this player's own. Without it "nothing to report" reads as
+				-- "nothing is claimed", which is wrong and confusing when the
+				-- one claimed booth is yours.
+				if (tonumber(Argument4) or 0) > 0 then
+					SetReportStatus("The only claimed booth is yours. You cannot report yourself.", false)
+				else
+					SetReportStatus("Nobody has claimed a booth yet, so there is nothing to report.", false)
+				end
+			else
+				SetReportStatus("")
 			end
 		end
 
@@ -3305,8 +3475,8 @@ RemoteEvent.OnClientEvent:Connect(function(Argument, Argument2, Argument3, Argum
 
 	elseif Argument == "ReportOk" then
 		SetReportStatus(Argument2 or "Sent.", false)
-		PickedBooth = nil
-		PickedReason = nil
+		Picker.Booth = nil
+		Picker.Reason = nil
 		ReportNote.Text = ""
 		RefreshPicks()
 

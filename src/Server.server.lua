@@ -366,6 +366,7 @@ local Frozen = {} -- [userId] = true
 local Godded = {} -- [userId] = true
 local Invisible = {} -- [userId] = true
 local ServerLocked = false
+local DiscoRunning = false
 
 local ImageStore = nil
 if USE_DATASTORE then
@@ -794,6 +795,17 @@ local Staff = {}
 local Bans = {}
 
 local RankCache = {} -- [Player] = number
+
+--[[
+	Declared here, assigned much further down.
+
+	The staff tags need RankOf and RankLabel, so they cannot be defined until
+	after those exist - but SetStaffRank, which has to refresh them, is defined
+	before that point. A forward local is the way to let the earlier function
+	call the later one; without it the call reads as a nil global and silently
+	does nothing, which is exactly the kind of bug the ordering check looks for.
+--]]
+local RefreshTagsFor
 
 local function ClearRankCache()
 	RankCache = {}
@@ -2471,6 +2483,7 @@ local function SetStaffRank(actor, targetUserId, rank, displayName)
 	-- appears or disappears without needing a rejoin.
 	if known then
 		PushWho(known)
+		RefreshTagsFor(known)
 		if IsAdmin(known) then
 			PushAdminAll(known)
 		else
@@ -2511,6 +2524,337 @@ AddCommand("unstaff", {
 	Blurb = "Take every rank off them.",
 	Run = function(actor, target)
 		return SetStaffRank(actor, target.UserId, RANK_NONE, target.Name)
+	end,
+})
+
+-------------------------------------------------------------------------------
+-- Trolling
+-------------------------------------------------------------------------------
+--[[
+	Harmless nonsense for staff to play with. Everything here is deliberately:
+
+	  * reversible, with /cleanup putting a person completely back to normal
+	  * incapable of taking someone's session away - nothing kicks, bans, or
+	    leaves a player stuck with no way out
+	  * Admin and up, because being flung across the map by a bored Mod stops
+	    being funny quite quickly
+	  * logged like every other command, so it is never a mystery who did it
+
+	Marked Troll = true so the panel can put them on their own page rather than
+	mixed in with the moderation buttons, where a mis-click matters more.
+--]]
+
+local TrollEffects = {} -- [userId] = {list of instances to clean up}
+
+local function TrackEffect(Player, thing)
+	local list = TrollEffects[Player.UserId]
+	if not list then
+		list = {}
+		TrollEffects[Player.UserId] = list
+	end
+	list[#list + 1] = thing
+	return thing
+end
+
+local function ClearEffects(Player)
+	local list = TrollEffects[Player.UserId]
+	if list then
+		for _, thing in ipairs(list) do
+			pcall(function()
+				thing:Destroy()
+			end)
+		end
+	end
+	TrollEffects[Player.UserId] = nil
+end
+
+-- Where to hang a particle effect. Works on R6 and R15.
+local function TorsoOf(Player)
+	local char = Player.Character
+	if not char then
+		return nil
+	end
+	return char:FindFirstChild("UpperTorso")
+		or char:FindFirstChild("Torso")
+		or char:FindFirstChild("HumanoidRootPart")
+end
+
+AddCommand("fling", {
+	Rank = RANK_ADMIN,
+	Args = {"player"},
+	Label = "Fling",
+	Blurb = "Launch them into the sky.",
+	Troll = true,
+	Run = function(actor, target)
+		local root = RootOf(target)
+		if not root then
+			return nil, "They have no character right now."
+		end
+
+		-- A shove rather than a teleport, so they arc and come back down
+		-- instead of vanishing.
+		root.Velocity = Vector3.new(
+			math.random(-80, 80),
+			math.random(120, 180),
+			math.random(-80, 80)
+		)
+		return "Flung " .. target.Name .. ".", nil
+	end,
+})
+
+AddCommand("spin", {
+	Rank = RANK_ADMIN,
+	Args = {"player"},
+	Label = "Spin",
+	Blurb = "Set them spinning. Cleared with Cleanup.",
+	Troll = true,
+	Run = function(actor, target)
+		local root = RootOf(target)
+		if not root then
+			return nil, "They have no character right now."
+		end
+
+		local spin = Instance.new("BodyAngularVelocity")
+		spin.Name = "TrollSpin"
+		spin.AngularVelocity = Vector3.new(0, 18, 0)
+		spin.MaxTorque = Vector3.new(0, math.huge, 0)
+		spin.P = math.huge
+		spin.Parent = root
+		TrackEffect(target, spin)
+
+		return "Spinning " .. target.Name .. ".", nil
+	end,
+})
+
+AddCommand("fire", {
+	Rank = RANK_ADMIN,
+	Args = {"player"},
+	Label = "Set Alight",
+	Blurb = "Put them on fire. Does no damage.",
+	Troll = true,
+	Run = function(actor, target)
+		local torso = TorsoOf(target)
+		if not torso then
+			return nil, "They have no character right now."
+		end
+
+		local f = Instance.new("Fire")
+		f.Name = "TrollFire"
+		f.Heat = 12
+		f.Size = 8
+		f.Parent = torso
+		TrackEffect(target, f)
+
+		return target.Name .. " is on fire. Harmlessly.", nil
+	end,
+})
+
+AddCommand("sparkle", {
+	Rank = RANK_ADMIN,
+	Args = {"player"},
+	Label = "Sparkles",
+	Blurb = "Make them fabulous.",
+	Troll = true,
+	Run = function(actor, target)
+		local torso = TorsoOf(target)
+		if not torso then
+			return nil, "They have no character right now."
+		end
+
+		local sp = Instance.new("Sparkles")
+		sp.Name = "TrollSparkles"
+		sp.Parent = torso
+		TrackEffect(target, sp)
+
+		return target.Name .. " is sparkling.", nil
+	end,
+})
+
+AddCommand("smoke", {
+	Rank = RANK_ADMIN,
+	Args = {"player"},
+	Label = "Smoke",
+	Blurb = "Cover them in smoke.",
+	Troll = true,
+	Run = function(actor, target)
+		local torso = TorsoOf(target)
+		if not torso then
+			return nil, "They have no character right now."
+		end
+
+		local sm = Instance.new("Smoke")
+		sm.Name = "TrollSmoke"
+		sm.Size = 6
+		sm.Opacity = 0.6
+		sm.Parent = torso
+		TrackEffect(target, sm)
+
+		return target.Name .. " is smoking.", nil
+	end,
+})
+
+AddCommand("ghost", {
+	Rank = RANK_ADMIN,
+	Args = {"player"},
+	Label = "Ghost",
+	Blurb = "Make them see-through but still there.",
+	Troll = true,
+	Run = function(actor, target)
+		local char = target.Character
+		if not char then
+			return nil, "They have no character right now."
+		end
+
+		for _, part in ipairs(char:GetDescendants()) do
+			if part:IsA("BasePart") and part.Name ~= "HumanoidRootPart" then
+				part.Transparency = 0.7
+			elseif part:IsA("Decal") then
+				part.Transparency = 0.7
+			end
+		end
+
+		return target.Name .. " is a ghost.", nil
+	end,
+})
+
+AddCommand("explode", {
+	Rank = RANK_ADMIN,
+	Args = {"player"},
+	Label = "Explode",
+	Blurb = "A big bang that does no damage.",
+	Troll = true,
+	Run = function(actor, target)
+		local root = RootOf(target)
+		if not root or not root.Position then
+			return nil, "They have no character right now."
+		end
+
+		local boom = Instance.new("Explosion")
+		boom.Position = root.Position
+		boom.BlastRadius = 12
+		-- Zero pressure means all noise and no harm: it shoves them about
+		-- without killing them or blowing a hole in the map.
+		boom.BlastPressure = 0
+		boom.DestroyJointRadiusPercent = 0
+		boom.Parent = Workspace
+
+		root.Velocity = Vector3.new(0, 90, 0)
+		return "Boom.", nil
+	end,
+})
+
+AddCommand("jail", {
+	Rank = RANK_ADMIN,
+	Args = {"player"},
+	Label = "Jail",
+	Blurb = "Box them in. Cleared with Cleanup.",
+	Troll = true,
+	Run = function(actor, target)
+		local root = RootOf(target)
+		if not root or not root.Position then
+			return nil, "They have no character right now."
+		end
+
+		local cage = Instance.new("Model")
+		cage.Name = "TrollJail"
+
+		local at = root.Position
+		local walls = {
+			{Vector3.new(10, 12, 1), at + Vector3.new(0, 0, 5)},
+			{Vector3.new(10, 12, 1), at + Vector3.new(0, 0, -5)},
+			{Vector3.new(1, 12, 10), at + Vector3.new(5, 0, 0)},
+			{Vector3.new(1, 12, 10), at + Vector3.new(-5, 0, 0)},
+			{Vector3.new(10, 1, 10), at + Vector3.new(0, 6, 0)},
+		}
+
+		for _, w in ipairs(walls) do
+			local part = Instance.new("Part")
+			part.Size = w[1]
+			part.Position = w[2]
+			part.Anchored = true
+			part.BrickColor = BrickColor.new("Really black")
+			part.Transparency = 0.35
+			part.Material = Enum.Material.Neon
+			part.Parent = cage
+		end
+
+		cage.Parent = Workspace
+		TrackEffect(target, cage)
+
+		return "Jailed " .. target.Name .. ".", nil
+	end,
+})
+
+AddCommand("cleanup", {
+	Rank = RANK_ADMIN,
+	Args = {"player"},
+	Label = "Cleanup",
+	Blurb = "Undo every troll effect on them.",
+	Troll = true,
+	Run = function(actor, target)
+		ClearEffects(target)
+
+		local char = target.Character
+		if char then
+			for _, part in ipairs(char:GetDescendants()) do
+				if part:IsA("BasePart") and part.Name ~= "HumanoidRootPart" then
+					-- Invisible is a moderation state, not a troll one, so it
+					-- is left alone here.
+					if not Invisible[target.UserId] then
+						part.Transparency = 0
+					end
+				elseif part:IsA("Decal") then
+					if not Invisible[target.UserId] then
+						part.Transparency = 0
+					end
+				elseif part:IsA("Fire") or part:IsA("Smoke")
+					or part:IsA("Sparkles") or part:IsA("BodyAngularVelocity") then
+					part:Destroy()
+				end
+			end
+		end
+
+		return "Cleaned up " .. target.Name .. ".", nil
+	end,
+})
+
+AddCommand("disco", {
+	Rank = RANK_ADMIN,
+	Args = {},
+	Label = "Disco",
+	Blurb = "Flash the whole map. Runs for about fifteen seconds.",
+	Troll = true,
+	Run = function(actor)
+		if DiscoRunning then
+			return nil, "The disco is already going."
+		end
+
+		DiscoRunning = true
+		local wasAmbient = Lighting.Ambient
+		local wasOutdoor = Lighting.OutdoorAmbient
+		local wasClock = Lighting.ClockTime
+
+		spawn(function()
+			-- Bounded rather than a toggle, so a disco can never be left on by
+			-- somebody who logs off and forgets about it.
+			for _ = 1, 30 do
+				if not DiscoRunning then
+					break
+				end
+				local c = Color3.fromRGB(
+					math.random(0, 255), math.random(0, 255), math.random(0, 255))
+				Lighting.Ambient = c
+				Lighting.OutdoorAmbient = c
+				wait(0.5)
+			end
+
+			Lighting.Ambient = wasAmbient
+			Lighting.OutdoorAmbient = wasOutdoor
+			Lighting.ClockTime = wasClock
+			DiscoRunning = false
+		end)
+
+		return "Disco time.", nil
 	end,
 })
 
@@ -2590,6 +2934,7 @@ local function CommandListFor(Player)
 				Danger = def.Danger and true or false,
 				Default = def.Default,
 				Raw = def.Raw and true or false,
+				Troll = def.Troll and true or false,
 			}
 		end
 	end
@@ -2828,17 +3173,31 @@ local function HandleReport(Player, data)
 end
 
 -- What the report window offers a player: the booths they could report.
+--[[
+	An empty list has two very different causes, and saying "no claimed booths"
+	for both was actively misleading: testing the button on your own booth,
+	alone in the server, reported that nothing was claimed when something
+	obviously was.
+
+	So the count of claimed booths goes out alongside the list, and the window
+	can tell "nobody has set one up yet" apart from "the only one is yours".
+--]]
 local function PushReportTargets(Player)
 	local list = {}
+	local claimed = 0
+
 	for _, booth in ipairs(Booths:GetChildren()) do
 		if IsBooth(booth) then
 			local owner = booth.Display.BoothOwner.Value
-			if owner and owner ~= Player then
-				list[#list + 1] = {
-					Booth = BoothIndex[booth],
-					OwnerName = owner.Name,
-					Text = booth.Display.SurfaceGui.TextLabel.Text,
-				}
+			if owner then
+				claimed = claimed + 1
+				if owner ~= Player then
+					list[#list + 1] = {
+						Booth = BoothIndex[booth],
+						OwnerName = owner.Name,
+						Text = booth.Display.SurfaceGui.TextLabel.Text,
+					}
+				end
 			end
 		end
 	end
@@ -2847,7 +3206,7 @@ local function PushReportTargets(Player)
 		return (a.Booth or 0) < (b.Booth or 0)
 	end)
 
-	RemoteEvent:FireClient(Player, "ReportTargets", list, REPORT_REASONS)
+	RemoteEvent:FireClient(Player, "ReportTargets", list, REPORT_REASONS, claimed)
 end
 
 RemoteEvent.OnServerEvent:Connect(function(Player, Argument, Argument2)
@@ -3138,6 +3497,201 @@ spawn(function()
 end)
 
 -------------------------------------------------------------------------------
+-- Staff tags
+-------------------------------------------------------------------------------
+--[[
+	Two ways everyone can see who is staff:
+
+	  * a label floating above their head
+	  * a coloured [Rank] in front of their chat messages
+
+	Both are driven from the same rank the panel uses, so a promotion or a
+	demotion changes them straight away rather than at the next rejoin.
+
+	The nametag is built on the server and parented to the character, so it
+	replicates to everyone without the client needing to know anything. It is
+	rebuilt on respawn, because the character - and therefore the tag - is
+	thrown away every time somebody dies.
+--]]
+
+local RANK_COLOUR = {}
+RANK_COLOUR[RANK_MOD] = Color3.fromRGB(130, 200, 255)
+RANK_COLOUR[RANK_ADMIN] = Color3.fromRGB(214, 170, 255)
+RANK_COLOUR[RANK_OWNER] = Color3.fromRGB(255, 196, 92)
+
+local TAG_NAME = "StaffTag"
+
+local function RemoveStaffTag(character)
+	if not character then
+		return
+	end
+	local head = character:FindFirstChild("Head")
+	if not head then
+		return
+	end
+	local existing = head:FindFirstChild(TAG_NAME)
+	if existing then
+		existing:Destroy()
+	end
+end
+
+--[[
+	The label above the head.
+
+	AlwaysOnTop is deliberately false: a tag that draws through the whole map
+	is how you end up with a wall of names visible from across the place. This
+	one behaves like the normal Roblox nameplate and hides behind geometry.
+--]]
+local function ApplyStaffTag(Player)
+	local character = Player.Character
+	if not character then
+		return
+	end
+
+	local head = character:FindFirstChild("Head")
+	if not head then
+		return
+	end
+
+	local rank = RankOf(Player)
+
+	-- Not staff, or no longer staff: make sure any old tag is gone.
+	if rank < RANK_MOD then
+		RemoveStaffTag(character)
+		return
+	end
+
+	local colour = RANK_COLOUR[rank] or RANK_COLOUR[RANK_MOD]
+
+	local gui = head:FindFirstChild(TAG_NAME)
+	if not gui then
+		gui = Instance.new("BillboardGui")
+		gui.Name = TAG_NAME
+		gui.Parent = head
+	end
+	gui.Size = UDim2.new(0, 200, 0, 34)
+	gui.StudsOffset = Vector3.new(0, 2.4, 0)
+	gui.AlwaysOnTop = false
+	gui.MaxDistance = 60
+	gui.LightInfluence = 0
+
+	local label = gui:FindFirstChild("Label")
+	if not label then
+		label = Instance.new("TextLabel")
+		label.Name = "Label"
+		label.Parent = gui
+	end
+	label.Size = UDim2.new(1, 0, 1, 0)
+	label.BackgroundTransparency = 1
+	label.Text = RankLabel(rank)
+	label.TextScaled = true
+	label.Font = Enum.Font.GothamBold
+	label.TextColor3 = colour
+
+	-- The same heavy black outline the panel and the shop use, so the tag
+	-- reads as part of the same game rather than bolted on.
+	local stroke = label:FindFirstChildOfClass("UIStroke")
+	if not stroke then
+		stroke = Instance.new("UIStroke")
+		stroke.Parent = label
+	end
+	stroke.Color = Color3.fromRGB(0, 0, 0)
+	stroke.Thickness = 3
+	stroke.Transparency = 0
+end
+
+-------------------------------------------------------------------------------
+-- Chat tags
+-------------------------------------------------------------------------------
+--[[
+	Roblox's default chat reads tags from a SetCore call on each client, which
+	is fiddly to keep in sync for everyone. The legacy ChatService has a proper
+	server side hook instead: give the speaker an ExtraData Tags entry and the
+	chat renders it in front of their name, in colour, for everybody.
+
+	Same caveat as the mute hook: this only exists if the place uses the
+	default chat. If it is missing the nametags still work, so staff are still
+	visible; it just is not in chat as well. Worth saying out loud rather than
+	failing silently.
+--]]
+
+local ChatServiceRef = nil
+
+local function ApplyChatTag(Player)
+	if not ChatServiceRef then
+		return
+	end
+
+	local ok = pcall(function()
+		local speaker = ChatServiceRef:GetSpeaker(Player.Name)
+		if not speaker then
+			return
+		end
+
+		local rank = RankOf(Player)
+		if rank < RANK_MOD then
+			speaker:SetExtraData("Tags", {})
+			return
+		end
+
+		speaker:SetExtraData("Tags", {
+			{TagText = RankLabel(rank), TagColor = RANK_COLOUR[rank]},
+		})
+		-- Colour their name to match, so the tag does not look detached.
+		speaker:SetExtraData("NameColor", RANK_COLOUR[rank])
+	end)
+
+	if not ok then
+		-- One speaker failing is not worth taking anything else down.
+		return
+	end
+end
+
+spawn(function()
+	local runner = nil
+	for _ = 1, 10 do
+		runner = ServerScriptService:FindFirstChild("ChatServiceRunner")
+		if runner then
+			break
+		end
+		wait(1)
+	end
+
+	if not runner then
+		print("[Booth] Default chat not found, staff will have nametags but no chat tag.")
+		return
+	end
+
+	local ok, err = pcall(function()
+		ChatServiceRef = require(runner:WaitForChild("ChatService"))
+
+		-- A speaker appears slightly after the player joins, so the tag is
+		-- applied on that event rather than on PlayerAdded.
+		ChatServiceRef.SpeakerAdded:Connect(function(name)
+			local p = Players:FindFirstChild(name)
+			if p then
+				ApplyChatTag(p)
+			end
+		end)
+
+		for _, p in ipairs(Players:GetPlayers()) do
+			ApplyChatTag(p)
+		end
+	end)
+
+	if not ok then
+		print("[Booth] Could not set chat tags: " .. tostring(err))
+	end
+end)
+
+-- Called whenever somebody's rank changes, so both tags follow immediately.
+-- Assigns the forward local declared up with the rank state.
+function RefreshTagsFor(Player)
+	ApplyStaffTag(Player)
+	ApplyChatTag(Player)
+end
+
+-------------------------------------------------------------------------------
 -- Players
 -------------------------------------------------------------------------------
 
@@ -3186,6 +3740,10 @@ local function PlayerAdded(Player)
 	GiveBoombox(Player)
 
 	Player.CharacterAdded:Connect(function()
+		-- The tag lives on the character, so it has to be rebuilt every
+		-- respawn or staff lose their label the first time they die.
+		ApplyStaffTag(Player)
+
 		wait(1)
 		GiveBoombox(Player)
 
@@ -3205,6 +3763,10 @@ local function PlayerAdded(Player)
 			end
 		end
 	end)
+
+	-- Covers the character that already exists at join time; CharacterAdded
+	-- only fires for later ones.
+	ApplyStaffTag(Player)
 
 	-- The staff player list is live, so everyone on shift sees the join.
 	BroadcastPlayers()
@@ -3233,6 +3795,7 @@ local function PlayerRemoving(Player)
 	Frozen[Player.UserId] = nil
 	Invisible[Player.UserId] = nil
 	Godded[Player.UserId] = nil
+	ClearEffects(Player)
 
 	BroadcastPlayers()
 end

@@ -90,9 +90,10 @@ def draw(path, page, out_path):
     nav = parse_block(src, "PageNav", consts)
     if nav.size:
         nx, ny, nw, nh = nav.rect(fw, fh, fx, fy)
-        for i, name in enumerate(["Home", "Players", "Reports", "Staff", "Shop"]):
-            bh = nh * 0.165
-            by = ny + i * (bh + nh * 0.03)
+        for i, name in enumerate(
+                ["Home", "Players", "Reports", "Staff", "Shop", "Trolling"]):
+            bh = nh * 0.14
+            by = ny + i * (bh + nh * 0.025)
             active = (name == page)
             box((nx + nw * 0.03, by, nw * 0.94, bh),
                 T.get("TabActive", (34, 36, 42)) if active else idle,
@@ -114,6 +115,8 @@ def draw(path, page, out_path):
         "ReportList": "report queue",
         "StaffList": "staff list",
         "StaffSide": "",
+        "TrollList": "player list",
+        "TrollSide": "",
         "AdminList": "passes",
         "NewButton": "+ New Gamepass",
         "Editor": "",
@@ -125,7 +128,8 @@ def draw(path, page, out_path):
             continue
         r = b.rect(hw, hh, hx, hy)
         fill = card if name.endswith("List") or name == "HomeInput" else idle
-        if name in ("HomeStats", "HomeActions", "PlayerActions", "StaffSide", "Editor"):
+        if name in ("HomeStats", "HomeActions", "PlayerActions", "StaffSide",
+                    "Editor", "TrollSide"):
             fill = None
             d.rectangle([r[0], r[1], r[0] + r[2], r[1] + r[3]],
                         outline=(70, 75, 85), width=1)

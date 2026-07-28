@@ -58,6 +58,7 @@ PAGES = {
     "Reports": ["ReportList"],
     "Staff": ["StaffList", "StaffSide"],
     "Shop": ["AdminList", "NewButton", "Editor"],
+    "Trolling": ["TrollList", "TrollSide"],
 }
 
 # Widgets positioned inside a page's own sub-frame rather than the page itself.
@@ -71,6 +72,7 @@ SQUARE = ["GreetImage"]
 
 NESTED = {
     "PlayerActions": ["SelectedLabel", "ActionInput", "ActionGrid"],
+    "TrollSide": ["TrollGrid"],
     "StaffSide": [
         "AddTitle", "AddHint", "StaffIdBox", "StaffNameBox",
         "MakeModButton", "MakeAdminButton", "RemoveStaffButton",

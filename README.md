@@ -66,7 +66,7 @@ that is only a convenience: firing the remote by hand hits the same checks.
 
 ## The panel
 
-Opened with the **Admin** button, which is only visible to staff. Five pages,
+Opened with the **Admin** button, which is only visible to staff. Six pages,
 and you are only sent the ones your rank can use.
 
 * **Home** — who you are, your headshot, a count of players / open reports /
@@ -77,6 +77,8 @@ and you are only sent the ones your rank can use.
 * **Reports** — the queue of reported booths.
 * **Staff** — the whitelist and the ban list. Admin and up.
 * **Shop** — the gamepass editor that used to be the whole panel. Admin and up.
+* **Trolling** — harmless pranks, kept away from the moderation buttons.
+  Admin and up.
 
 The header greets you by name with your own avatar headshot: `Hello, <name>.`
 
@@ -98,10 +100,46 @@ server makes a button appear on its own, with no client change.
 | **Mod** | `kick` `mute` `unmute` `freeze` `unfreeze` `warn` `bring` `goto` `respawn` `speed` `jump` `heal` `clearbooth` `unclaim` `announce` `time` |
 | **Admin** | `ban` `unban` `god` `ungod` `invisible` `visible` `resetbooths` `lock` `unlock` `mod` `unstaff` |
 | **Owner** | `admin` |
+| **Trolling** (Admin) | `fling` `spin` `fire` `sparkle` `smoke` `ghost` `explode` `jail` `disco` `cleanup` |
 
 `lock` turns away anyone who is not staff. Bans and mutes survive a rejoin;
 freeze, god and invisible are per session but survive a respawn, so resetting
 is not an escape.
+
+## Staff tags
+
+Staff are visible to everyone two ways: a coloured label above their head, and
+a `[Rank]` in front of their chat messages. Both follow the rank they already
+have, so a promotion or demotion updates them immediately rather than at the
+next rejoin, and the nametag is rebuilt on respawn.
+
+The nametag deliberately does **not** draw through walls, so a busy server does
+not turn into a wall of floating names.
+
+The chat tag needs the default Roblox chat, because that is what exposes a
+server side hook for it. If the place uses a custom chat the nametags still
+work and the output says the chat tag was skipped, rather than failing quietly.
+
+## Trolling
+
+An Admin-only page of harmless nonsense: `fling`, `spin`, `fire`, `sparkle`,
+`smoke`, `ghost`, `explode`, `jail`, `disco`, and `cleanup` to undo all of it.
+
+They are on their own page rather than mixed in with moderation, so a mis-click
+sets somebody on fire instead of banning them rather than the other way round.
+Every one of them is:
+
+* **reversible** — `cleanup` puts a person fully back to normal
+* **unable to end a session** — nothing here kicks, bans, or leaves somebody
+  stuck with no way out, and the explosion has zero blast pressure so it cannot
+  actually hurt anyone
+* **Admin and up** — being flung across the map by a bored Mod stops being
+  funny quickly
+* **logged** like every other command, so it is never a mystery who did it
+
+`cleanup` deliberately leaves a moderation `invisible` alone, so it cannot be
+used to put a hidden mod back on screen. The disco runs for a fixed fifteen
+seconds rather than toggling, so it cannot be left on by someone who logs off.
 
 ## Reports
 
@@ -143,7 +181,7 @@ a test for each of those cases.
 python3 tools/runtests.py
 ```
 
-199 tests. They run the real `Server.server.lua` and `Client.client.lua`
+260 tests. They run the real `Server.server.lua` and `Client.client.lua`
 against a mock of the Roblox API (`tools/mock_roblox.lua`, `tools/harness.lua`)
 and drive both halves the way a player would, including pressing client buttons
 and checking what the server actually did.
