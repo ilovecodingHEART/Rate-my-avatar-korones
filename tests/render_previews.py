@@ -22,8 +22,10 @@ PAD = float(re.search(r'ListLayout\.Padding = UDim\.new\(([\d.]+)', CLIENT).grou
 TOPPAD = float(re.search(r'Padding\.PaddingTop = UDim\.new\(([\d.]+)', CLIENT).group(1))
 
 PASSES=[]
-for k,i,t,bl in re.findall(r'(\w+) = \{\s*Id = (\d+),\s*IsGamePass = \w+,\s*Title = "([^"]+)",\s*Blurb = "([^"]+)"', SERVER):
-    PASSES.append({'key':k,'id':i,'title':t,'blurb':bl})
+for m in re.finditer(r'(\w+) = \{\s*Id = (\d+),\s*IsGamePass = \w+,\s*Category = "([^"]*)",\s*Title = "([^"]+)",\s*Blurb = "([^"]+)",\s*Icon = "([^"]*)",\s*Price = "([^"]*)"', SERVER):
+    k,i,cat,t,bl,icon,price = m.groups()
+    PASSES.append({'key':k,'id':i,'cat':cat,'title':t,'blurb':bl,'icon':icon,'price':price})
+CATS=[x.strip().strip('"') for x in re.search(r'SHOP_CATEGORIES = \{([^}]+)\}', SERVER).group(1).split(',')]
 ORDER=[x.strip().strip('"') for x in re.search(r'SHOP_ORDER = \{([^}]+)\}', SERVER).group(1).split(',')]
 PASSES.sort(key=lambda p: ORDER.index(p['key']))
 
@@ -112,35 +114,94 @@ def booth_menu(path, unlocked):
     return path
 
 # ---------------------------------------------------------------------- shop
-def shop(path, owned_keys):
-    FW,FH=int(0.42*1100*S),int(0.46*950*S)
-    M=46*S; W,H=FW+M*2,FH+M*2
-    img,d=backdrop(W,H)
-    FX,FY=M,M
-    panel(d,img,(FX,FY,FX+FW,FY+FH),T['PanelBackground'],T['PanelStroke'],14*S,3*S,True)
-    y=FY+0.03*FH
-    th=0.14*FH
-    ctext(d,(FX,y,FX+FW,y+th),"Shop",font(int(th*0.6),True),T['Text'])
-    y+=th+0.02*FH
-    for p in PASSES:
-        rh=0.20*FH; rw=0.94*FW; x0=FX+(FW-rw)/2
-        nh=0.36*rh
-        ctext(d,(x0,y,x0+rw,y+nh),p['title'],font(int(nh*0.62),True),T['Text'])
-        by=y+nh+0.02*rh; bh2=0.26*rh
-        ctext(d,(x0,by,x0+rw,by+bh2),p['blurb'],font(int(bh2*0.62)),T['MutedText'])
-        cy=by+bh2+0.02*rh; ch=0.34*rh; cw=0.55*rw
-        cb=(FX+(FW-cw)/2,cy,FX+(FW+cw)/2,cy+ch)
-        if p['key'] in owned_keys:
-            panel(d,img,cb,T['OwnedBackground'],T['OwnedStroke'],8*S,2*S)
-            ctext(d,cb,"Owned",font(int(ch*0.5),True),T['OwnedText'])
+def shop(path, owned_keys, tab=None):
+    tab = tab or CATS[0]
+    FW,FH = int(0.56*1180*S), int(0.50*820*S)
+    M = 52*S; TOP = 60*S
+    W,H = FW+M*2, FH+M+TOP
+    img,d = backdrop(W,H)
+    FX,FY = M, TOP
+    OUT_=T['ShopOutline']
+
+    # title above the window
+    ctext(d,(FX,FY-TOP,FX+FW,FY),"Shop!",font(int(TOP*0.72),True),T['Text'])
+
+    panel(d,img,(FX,FY,FX+FW,FY+FH),T['PanelBackground'],OUT_,16*S,4*S,True)
+
+    # sidebar
+    sx = FX+0.028*FW; sy = FY+0.05*FH
+    sw, sh = 0.235*FW, 0.9*FH
+    th = 0.235*sh; gap = 0.035*sh
+    for i,c in enumerate(CATS):
+        by = sy + i*(th+gap)
+        bb=(sx+0.05*sw, by, sx+0.95*sw, by+th)
+        if c==tab:
+            panel(d,img,bb,T['TabActive'],OUT_,16*S,4*S)
+            ctext(d,bb,c,font(int(th*0.30),True),T['Text'])
         else:
-            panel(d,img,cb,T['ButtonBackground'],T['ButtonStroke'],8*S,2*S)
-            ctext(d,cb,"Buy",font(int(ch*0.5),True),T['Text'])
-        y+=rh+0.02*FH
-    ch=0.11*FH; cw=0.34*FW
-    cb=(FX+(FW-cw)/2,FY+FH-0.03*FH-ch,FX+(FW+cw)/2,FY+FH-0.03*FH)
-    panel(d,img,cb,T['ButtonBackground'],T['ButtonStroke'],8*S,2*S)
-    ctext(d,cb,"Close",font(int(ch*0.46),True),T['Text'])
+            panel(d,img,bb,T['TabIdle'],OUT_,16*S,3*S)
+            ctext(d,bb,c,font(int(th*0.30),True),T['MutedText'])
+
+    # grid
+    gx = FX+0.285*FW; gy = FY+0.05*FH
+    gw, gh = 0.69*FW, 0.9*FH
+    cw = 0.47*gw
+    cardh = cw/1.30
+    padx = 0.04*gw; pady = 0.04*gw
+    items=[p for p in PASSES if p['cat']==tab]
+    if not items:
+        ctext(d,(gx,gy+gh/2-30*S,gx+gw,gy+gh/2+30*S),"Nothing here yet.",
+              font(int(26*S)),T['MutedText'])
+    for n,p in enumerate(items):
+        col = n%2; row = n//2
+        x0 = gx + col*(cw+padx)
+        y0 = gy + row*(cardh+pady)
+        if y0+cardh > gy+gh+cardh*0.5: break
+        cb=(x0,y0,x0+cw,y0+cardh)
+        panel(d,img,cb,T['CardBackground'],OUT_,16*S,4*S)
+        # title
+        ctext(d,(x0,y0+0.03*cardh,x0+cw,y0+0.22*cardh),p['title'],
+              font(int(cardh*0.125),True),T['Text'])
+        # icon box
+        ib=(x0+0.06*cw, y0+0.26*cardh, x0+0.40*cw, y0+0.70*cardh)
+        panel(d,img,ib,T['InputBackground'],OUT_,8*S,2*S)
+        if not p['icon']:
+            ctext(d,ib,"icon",font(int(cardh*0.085)),T['Placeholder'])
+        # price + blurb
+        ltext(d,(x0+0.44*cw,y0+0.28*cardh,x0+0.94*cw,y0+0.48*cardh),
+              p['price'],font(int(cardh*0.115),True),T['Text'],padx=0)
+        # wrap the blurb to the text column instead of letting it overflow
+        fb=font(int(cardh*0.070))
+        maxw=0.50*cw
+        words=p['blurb'].split(); lines=[]; cur=""
+        for w in words:
+            t=(cur+" "+w).strip()
+            if d.textlength(t,font=fb)<=maxw: cur=t
+            else:
+                if cur: lines.append(cur)
+                cur=w
+            if len(lines)==3: break
+        if cur and len(lines)<3: lines.append(cur)
+        ly=y0+0.47*cardh
+        for ln in lines:
+            d.text((x0+0.44*cw,ly),ln,font=fb,fill=T['MutedText'])
+            ly+=int(cardh*0.085)
+        # buy
+        bh2=0.22*cardh
+        bb2=(x0+0.07*cw, y0+cardh-0.04*cardh-bh2, x0+0.93*cw, y0+cardh-0.04*cardh)
+        if p['key'] in owned_keys:
+            panel(d,img,bb2,T['OwnedBackground'],OUT_,8*S,3*S)
+            ctext(d,bb2,"Owned",font(int(bh2*0.46),True),T['OwnedText'])
+        else:
+            panel(d,img,bb2,T['BuyBackground'],OUT_,8*S,3*S)
+            ctext(d,bb2,"Buy",font(int(bh2*0.46),True),T['BuyText'])
+
+    # close button
+    r=0.046*FW
+    cx,cy=FX+FW, FY
+    d.ellipse((cx-r,cy-r,cx+r,cy+r),fill=T['DangerBackground'],outline=OUT_,width=3*S)
+    ctext(d,(cx-r,cy-r,cx+r,cy+r),"X",font(int(r*1.0),True),T['DangerText'])
+
     img.resize((W//S,H//S),Image.LANCZOS).save(path)
     return path
 
@@ -182,12 +243,26 @@ def boombox(path):
     img.resize((W//S,H//S),Image.LANCZOS).save(path)
     return path
 
+def hud(path):
+    W,H=760*S,300*S
+    img,d=backdrop(W,H)
+    bw,bh=0.30*W,0.115*H
+    for i,cap in enumerate(["Shop","Open Booth Menu"]):
+        by=0.30*H+i*(bh+0.035*H)
+        bb=(0.03*W,by,0.03*W+bw,by+bh)
+        panel(d,img,bb,T['PanelBackground'],T['ShopOutline'],16*S,4*S,True)
+        ctext(d,bb,cap,font(int(bh*0.36),True),T['Text'])
+    img.resize((W//S,H//S),Image.LANCZOS).save(path)
+    return path
+
 os.makedirs(OUT,exist_ok=True)
 made=[
  booth_menu(os.path.join(OUT,'gui-booth-locked.png'), False),
  booth_menu(os.path.join(OUT,'gui-booth-unlocked.png'), True),
  shop(os.path.join(OUT,'gui-shop.png'), set()),
  shop(os.path.join(OUT,'gui-shop-owned.png'), {'UPLOAD','PERMANENT'}),
+ shop(os.path.join(OUT,'gui-shop-items-tab.png'), set(), tab=CATS[1] if len(CATS)>1 else CATS[0]),
+ hud(os.path.join(OUT,'gui-hud.png')),
  loading(os.path.join(OUT,'gui-loading.png')),
  boombox(os.path.join(OUT,'gui-boombox.png')),
 ]

@@ -33,15 +33,49 @@ clicking it opens the shop.
 
 ![Booth menu unlocked](docs/gui-booth-unlocked.png)
 
+### On-screen buttons
+
+Always visible in the corner.
+
+![HUD buttons](docs/gui-hud.png)
+
 ### Shop
 
-One row per gamepass, pulled live from the server's `PASSES` table.
+Sidebar tabs on the left, a scrolling grid of item cards on the right. Each
+card has an icon, a name, a price label and a Buy button. Everything is drawn
+from the server's `PASSES` table, so adding an item is a config change.
 
 ![Shop](docs/gui-shop.png)
 
-Items you already own show a green **Owned** badge instead of **Buy**:
+Items you already own show **Owned** in green instead of **Buy**:
 
 ![Shop with owned items](docs/gui-shop-owned.png)
+
+An empty tab says so rather than looking broken:
+
+![Empty shop tab](docs/gui-shop-items-tab.png)
+
+#### Adding icons and items
+
+Icons are blank until you set them. In the server script:
+
+```lua
+UPLOAD = {
+    Id = 356360,
+    Category = "Passes",
+    Title = "Image Upload",
+    Blurb = "Put your own image on the booth you claim.",
+    Icon = "rbxassetid://123456789",   -- <- put the id here
+    Price = "Gamepass",
+},
+```
+
+`Icon = ""` draws a plain placeholder box, so the shop looks correct with no
+icons set. `Price` is only the label on the card; the real cost is whatever the
+catalog item is priced at.
+
+Tabs come from `SHOP_CATEGORIES`. Add a name there, tag items with that
+`Category`, and the tab appears.
 
 ### Boombox
 

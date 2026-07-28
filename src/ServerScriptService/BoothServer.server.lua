@@ -75,29 +75,55 @@ local SAVE_RETRIES = 3
 	                                    ^^^^^^
 --]]
 
+--[[
+	Icon is the picture shown on the shop card. Fill these in with an asset id
+	when you have them, exactly like this:
+
+	    Icon = "rbxassetid://123456789",
+
+	Leave it as "" and the card draws a plain placeholder box instead, so the
+	shop still looks right with no icons set.
+
+	Price is only the label printed on the card. It does not charge anything;
+	the real price is whatever the catalog item costs.
+--]]
+
 local PASSES = {
 	UPLOAD = {
 		Id = 356360,
 		IsGamePass = false,
-		Title = "Image Upload Gamepass",
+		Category = "Passes",
+		Title = "Image Upload",
 		Blurb = "Put your own image on the booth you claim.",
+		Icon = "",
+		Price = "Gamepass",
 	},
 	BOOMBOX = {
 		Id = 353454,
 		IsGamePass = false,
-		Title = "Boombox Gamepass",
+		Category = "Passes",
+		Title = "Boombox",
 		Blurb = "Carry a boombox and play any audio ID.",
+		Icon = "",
+		Price = "Gamepass",
 	},
 	PERMANENT = {
 		Id = 353447,
 		IsGamePass = false,
-		Title = "Permanent Image Gamepass",
+		Category = "Passes",
+		Title = "Permanent Image",
 		Blurb = "Your image stays on the booth after you leave.",
+		Icon = "",
+		Price = "Gamepass",
 	},
 }
 
 -- Order the shop lists them in.
 local SHOP_ORDER = {"UPLOAD", "PERMANENT", "BOOMBOX"}
+
+-- Sidebar tabs, in order. Add a category here and tag items with it to grow
+-- the shop; a tab with nothing in it simply shows an empty message.
+local SHOP_CATEGORIES = {"Passes", "Items"}
 
 -- Player-facing wording never names the shirts.
 local PASS_WORD = "Gamepass"
@@ -362,14 +388,17 @@ local function PushPassState(Player, UseCache)
 		state[#state + 1] = {
 			Key = Key,
 			Id = Pass.Id,
+			Category = Pass.Category or "Passes",
 			Title = Pass.Title,
 			Blurb = Pass.Blurb,
+			Icon = Pass.Icon or "",
+			Price = Pass.Price or "Gamepass",
 			Owns = PlayerOwns(Player, Key, UseCache),
 		}
 	end
 
 	if Player.Parent ~= nil then
-		RemoteEvent:FireClient(Player, "PassState", state)
+		RemoteEvent:FireClient(Player, "PassState", state, SHOP_CATEGORIES)
 	end
 	return state
 end

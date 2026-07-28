@@ -299,6 +299,26 @@ if tool is not None:
 check("shared BoomboxRemote created in ReplicatedStorage",
       M3.RS.FindFirstChild(M3.RS, "BoomboxRemote") is not None)
 
+print("\n=== shop metadata for the card layout ===")
+L,M,bs = boot(owned=(UPLOAD,))
+p = mkplayer(M); M.Players.PlayerAdded.Fire(p)
+st=[m for m in msgs(M) if m[0]=="PassState"]
+entries=list(st[-1][1].values()) if st else []
+check("PassState still sends every pass", len(entries)==3, str(len(entries)))
+fields=all(hasattr(e,'Category') and hasattr(e,'Title') and hasattr(e,'Icon')
+           and hasattr(e,'Price') and hasattr(e,'Blurb') for e in entries)
+check("each entry carries Category/Title/Icon/Price/Blurb", fields)
+check("icons default to empty string (fill in later)",
+      all(e.Icon=="" for e in entries), str([e.Icon for e in entries]))
+check("titles no longer repeat the word Gamepass",
+      all("Gamepass" not in e.Title for e in entries),
+      str([e.Title for e in entries]))
+check("price label says Gamepass",
+      all(e.Price=="Gamepass" for e in entries))
+check("all tagged to a real category",
+      all(e.Category in ("Passes","Items") for e in entries),
+      str([e.Category for e in entries]))
+
 print()
 bad=[x for x in ok if not x]
 print("%d/%d checks passed"%(len(ok)-len(bad),len(ok)))

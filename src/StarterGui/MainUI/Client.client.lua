@@ -59,6 +59,16 @@ local THEME = {
 	OwnedStroke = Color3.fromRGB(62, 122, 74),
 	OwnedText = Color3.fromRGB(130, 235, 155),
 
+	-- Shop: cartoon layout, dark palette. The heavy outline is what gives the
+	-- reference its look, so it stays near-black rather than grey.
+	ShopOutline = Color3.fromRGB(0, 0, 0),
+	CardBackground = Color3.fromRGB(22, 23, 27),
+	TabActive = Color3.fromRGB(34, 36, 42),
+	TabIdle = Color3.fromRGB(20, 21, 25),
+	BuyBackground = Color3.fromRGB(28, 92, 44),
+	BuyStroke = Color3.fromRGB(74, 190, 104),
+	BuyText = Color3.fromRGB(190, 255, 205),
+
 	Text = Color3.fromRGB(236, 238, 242),
 	MutedText = Color3.fromRGB(150, 156, 166),
 	Placeholder = Color3.fromRGB(110, 116, 126),
@@ -69,8 +79,14 @@ local THEME = {
 
 local PANEL_CORNER = UDim.new(0, 14)
 local CONTROL_CORNER = UDim.new(0, 8)
+local SHOP_CORNER = UDim.new(0, 16)
 local STATUS_TIME = 4
 local PASS_WORD = "Gamepass"
+
+-- GothamBold is the closest built-in to the chunky reference lettering and
+-- exists on old clients; FontFace/custom fonts do not.
+local TITLE_FONT = Enum.Font.GothamBold
+local BODY_FONT = Enum.Font.Gotham
 
 local LAYOUT = {
 	{Name = "TextLabel", Order = 1, Height = 0.130, Width = 1.00},
@@ -300,123 +316,329 @@ ShopButton.Position = UDim2.new(
 	ToggleButton.Position.Y.Offset
 )
 SetCaption(ShopButton, "Shop")
-StyleButton(ShopButton, THEME.PanelBackground, THEME.PanelStroke, THEME.Text)
-GetOrMakeCorner(ShopButton, CONTROL_CORNER)
+StyleButton(ShopButton, THEME.PanelBackground, THEME.ShopOutline, THEME.Text)
+GetOrMakeCorner(ShopButton, SHOP_CORNER)
+StyleBorder(ShopButton, THEME.ShopOutline, 4)
 AddSheen(ShopButton)
+
+-- Match the heavier shop outline on the booth toggle so the two HUD buttons
+-- read as a pair.
+StyleBorder(ToggleButton, THEME.ShopOutline, 4)
+GetOrMakeCorner(ToggleButton, SHOP_CORNER)
+
+-- Root window --------------------------------------------------------------
 
 local ShopFrame = ScreenGui:FindFirstChild("ShopFrame")
 if not ShopFrame then
-	ShopFrame = Frame:Clone()
+	ShopFrame = Instance.new("Frame")
 	ShopFrame.Name = "ShopFrame"
-	-- Start clean: the booth widgets are not wanted in here.
-	for _, c in ipairs(ShopFrame:GetChildren()) do
-		if c:IsA("GuiObject") then
-			c:Destroy()
-		end
-	end
 	ShopFrame.Parent = ScreenGui
 end
-
 ShopFrame.Visible = false
-ShopFrame.Size = UDim2.new(0.42, 0, 0.46, 0)
+ShopFrame.Size = UDim2.new(0.56, 0, 0.50, 0)
 ShopFrame.Position = UDim2.new(0.5, 0, 0.5, 0)
 ShopFrame.AnchorPoint = Vector2.new(0.5, 0.5)
 ShopFrame.BackgroundColor3 = THEME.PanelBackground
-ShopFrame.BackgroundTransparency = 0
 ShopFrame.BorderSizePixel = 0
-GetOrMakeCorner(ShopFrame, PANEL_CORNER)
-StyleBorder(ShopFrame, THEME.PanelStroke, 3)
+ShopFrame.ClipsDescendants = false
+GetOrMakeCorner(ShopFrame, SHOP_CORNER)
+StyleBorder(ShopFrame, THEME.ShopOutline, 4)
 AddSheen(ShopFrame)
 
-local shopRatio = ShopFrame:FindFirstChildOfClass("UIAspectRatioConstraint")
-if shopRatio then
-	shopRatio:Destroy()
+for _, junk in ipairs(ShopFrame:GetChildren()) do
+	if junk:IsA("UIAspectRatioConstraint") or junk:IsA("UIListLayout") then
+		junk:Destroy()
+	end
 end
 
-local shopList = ShopFrame:FindFirstChildOfClass("UIListLayout")
-if not shopList then
-	shopList = Instance.new("UIListLayout")
-	shopList.Parent = ShopFrame
+-- Big title sitting above the window, like the reference.
+local ShopTitle = ShopFrame:FindFirstChild("ShopTitle")
+if not ShopTitle then
+	ShopTitle = Instance.new("TextLabel")
+	ShopTitle.Name = "ShopTitle"
+	ShopTitle.Parent = ShopFrame
 end
-shopList.SortOrder = Enum.SortOrder.LayoutOrder
-shopList.Padding = UDim.new(0.02, 0)
-shopList.HorizontalAlignment = Enum.HorizontalAlignment.Center
-shopList.VerticalAlignment = Enum.VerticalAlignment.Top
-
-local shopPad = ShopFrame:FindFirstChildOfClass("UIPadding")
-if not shopPad then
-	shopPad = Instance.new("UIPadding")
-	shopPad.Parent = ShopFrame
-end
-shopPad.PaddingTop = UDim.new(0.03, 0)
-shopPad.PaddingBottom = UDim.new(0.03, 0)
-
-local ShopTitle = CloneLabel("ShopTitle", ShopFrame)
-ShopTitle.Text = "Shop"
-ShopTitle.LayoutOrder = 0
-ShopTitle.Size = UDim2.new(1, 0, 0.14, 0)
+ShopTitle.Size = UDim2.new(1, 0, 0.15, 0)
+ShopTitle.Position = UDim2.new(0.5, 0, -0.015, 0)
+ShopTitle.AnchorPoint = Vector2.new(0.5, 1)
+ShopTitle.BackgroundTransparency = 1
+ShopTitle.Text = "Shop!"
+ShopTitle.TextScaled = true
+ShopTitle.Font = TITLE_FONT
 ShopTitle.TextColor3 = THEME.Text
-StyleTextStroke(ShopTitle)
+ShopTitle.TextStrokeTransparency = 1
+do
+	local st = ShopTitle:FindFirstChildOfClass("UIStroke")
+	if not st then
+		st = Instance.new("UIStroke")
+		st.Parent = ShopTitle
+	end
+	st.Color = THEME.ShopOutline
+	st.Thickness = 4
+	st.Transparency = 0
+end
 
-local ShopClose = CloneButton("ShopClose", "Close", ShopFrame)
-ShopClose.LayoutOrder = 999
-ShopClose.Size = UDim2.new(0.34, 0, 0.11, 0)
-StyleButton(ShopClose, THEME.ButtonBackground, THEME.ButtonStroke, THEME.Text)
+-- Close button, top right corner of the window.
+local ShopClose = ShopFrame:FindFirstChild("ShopClose")
+if not ShopClose then
+	ShopClose = Instance.new("TextButton")
+	ShopClose.Name = "ShopClose"
+	ShopClose.Parent = ShopFrame
+end
+ShopClose.Size = UDim2.new(0.062, 0, 0.092, 0)
+ShopClose.Position = UDim2.new(1, 0, 0, 0)
+ShopClose.AnchorPoint = Vector2.new(0.5, 0.5)
+ShopClose.Text = "X"
+ShopClose.TextScaled = true
+ShopClose.Font = TITLE_FONT
+ShopClose.BackgroundColor3 = THEME.DangerBackground
+ShopClose.TextColor3 = THEME.DangerText
+ShopClose.BorderSizePixel = 0
+ShopClose.ZIndex = 5
+GetOrMakeCorner(ShopClose, UDim.new(1, 0))
+StyleBorder(ShopClose, THEME.ShopOutline, 3)
 
--- Key -> its buy button, so state updates are cheap.
+-- Sidebar --------------------------------------------------------------------
+
+local Sidebar = ShopFrame:FindFirstChild("Sidebar")
+if not Sidebar then
+	Sidebar = Instance.new("Frame")
+	Sidebar.Name = "Sidebar"
+	Sidebar.Parent = ShopFrame
+end
+Sidebar.Size = UDim2.new(0.235, 0, 0.9, 0)
+Sidebar.Position = UDim2.new(0.028, 0, 0.05, 0)
+Sidebar.BackgroundTransparency = 1
+
+local sideList = Sidebar:FindFirstChildOfClass("UIListLayout")
+if not sideList then
+	sideList = Instance.new("UIListLayout")
+	sideList.Parent = Sidebar
+end
+sideList.SortOrder = Enum.SortOrder.LayoutOrder
+sideList.Padding = UDim.new(0.035, 0)
+sideList.HorizontalAlignment = Enum.HorizontalAlignment.Center
+sideList.VerticalAlignment = Enum.VerticalAlignment.Top
+
+-- Item grid ------------------------------------------------------------------
+
+local Grid = ShopFrame:FindFirstChild("Grid")
+if not Grid then
+	Grid = Instance.new("ScrollingFrame")
+	Grid.Name = "Grid"
+	Grid.Parent = ShopFrame
+end
+Grid.Size = UDim2.new(0.69, 0, 0.9, 0)
+Grid.Position = UDim2.new(0.285, 0, 0.05, 0)
+Grid.BackgroundTransparency = 1
+Grid.BorderSizePixel = 0
+Grid.ScrollBarThickness = 8
+Grid.ScrollBarImageColor3 = THEME.PanelStroke
+Grid.CanvasSize = UDim2.new(0, 0, 0, 0)
+Grid.AutomaticCanvasSize = Enum.AutomaticSize.Y
+
+local gridLayout = Grid:FindFirstChildOfClass("UIGridLayout")
+if not gridLayout then
+	gridLayout = Instance.new("UIGridLayout")
+	gridLayout.Parent = Grid
+end
+gridLayout.CellSize = UDim2.new(0.47, 0, 0, 0)
+gridLayout.CellPadding = UDim2.new(0.04, 0, 0.04, 0)
+gridLayout.SortOrder = Enum.SortOrder.LayoutOrder
+gridLayout.HorizontalAlignment = Enum.HorizontalAlignment.Center
+
+local gridRatio = gridLayout:FindFirstChildOfClass("UIAspectRatioConstraint")
+if not gridRatio then
+	gridRatio = Instance.new("UIAspectRatioConstraint")
+	gridRatio.Parent = gridLayout
+end
+gridRatio.AspectRatio = 1.30
+
+local Empty = Grid:FindFirstChild("EmptyNote")
+if not Empty then
+	Empty = Instance.new("TextLabel")
+	Empty.Name = "EmptyNote"
+	Empty.Parent = ShopFrame
+end
+Empty.Size = UDim2.new(0.66, 0, 0.2, 0)
+Empty.Position = UDim2.new(0.63, 0, 0.5, 0)
+Empty.AnchorPoint = Vector2.new(0.5, 0.5)
+Empty.BackgroundTransparency = 1
+Empty.Text = "Nothing here yet."
+Empty.TextScaled = true
+Empty.Font = BODY_FONT
+Empty.TextColor3 = THEME.MutedText
+Empty.Visible = false
+
+-- Building -------------------------------------------------------------------
+
 local ShopRows = {}
+local ShopCards = {}
+local TabButtons = {}
+local CurrentTab = nil
+local ShopEntries = {}
 
+local function RefreshGrid()
+	local shown = 0
+	for key, card in pairs(ShopCards) do
+		local entry = ShopEntries[key]
+		local vis = (entry ~= nil) and (entry.Category == CurrentTab)
+		card.Visible = vis
+		if vis then
+			shown = shown + 1
+		end
+	end
+	Empty.Visible = (shown == 0)
+	Grid.Visible = (shown > 0)
+end
+
+local function StyleTab(button, active)
+	if active then
+		button.BackgroundColor3 = THEME.TabActive
+		StyleBorder(button, THEME.ShopOutline, 4)
+		button.TextColor3 = THEME.Text
+	else
+		button.BackgroundColor3 = THEME.TabIdle
+		StyleBorder(button, THEME.ShopOutline, 3)
+		button.TextColor3 = THEME.MutedText
+	end
+end
+
+local function SelectTab(name)
+	CurrentTab = name
+	for tabName, button in pairs(TabButtons) do
+		StyleTab(button, tabName == name)
+	end
+	RefreshGrid()
+end
+
+local function BuildTab(name, order)
+	local button = TabButtons[name]
+	if not button then
+		button = Instance.new("TextButton")
+		button.Name = "Tab_" .. name
+		button.Parent = Sidebar
+		button.MouseButton1Click:Connect(function()
+			SelectTab(name)
+		end)
+		TabButtons[name] = button
+	end
+	button.LayoutOrder = order
+	button.Size = UDim2.new(0.9, 0, 0.235, 0)
+	button.Text = name
+	button.TextScaled = true
+	button.Font = TITLE_FONT
+	button.BorderSizePixel = 0
+	button.AutoButtonColor = true
+	GetOrMakeCorner(button, SHOP_CORNER)
+	StyleTab(button, name == CurrentTab)
+	return button
+end
+
+-- One item card: icon, name, price, buy button.
 local function BuildShopRow(entry, order)
-	local rowName = "Row_" .. entry.Key
-	local row = ShopFrame:FindFirstChild(rowName)
-	if not row then
-		row = Instance.new("Frame")
-		row.Name = rowName
-		row.BackgroundTransparency = 1
-		row.Parent = ShopFrame
+	local card = ShopCards[entry.Key]
+	if not card then
+		card = Instance.new("Frame")
+		card.Name = "Card_" .. entry.Key
+		card.Parent = Grid
+		ShopCards[entry.Key] = card
 	end
-	row.LayoutOrder = order
-	row.Size = UDim2.new(0.94, 0, 0.20, 0)
+	card.LayoutOrder = order
+	card.BackgroundColor3 = THEME.CardBackground
+	card.BorderSizePixel = 0
+	GetOrMakeCorner(card, SHOP_CORNER)
+	StyleBorder(card, THEME.ShopOutline, 4)
 
-	local rl = row:FindFirstChildOfClass("UIListLayout")
-	if not rl then
-		rl = Instance.new("UIListLayout")
-		rl.Parent = row
+	local title = card:FindFirstChild("Title")
+	if not title then
+		title = Instance.new("TextLabel")
+		title.Name = "Title"
+		title.Parent = card
 	end
-	rl.SortOrder = Enum.SortOrder.LayoutOrder
-	rl.Padding = UDim.new(0.02, 0)
-	rl.HorizontalAlignment = Enum.HorizontalAlignment.Center
-	rl.VerticalAlignment = Enum.VerticalAlignment.Top
+	title.Size = UDim2.new(0.94, 0, 0.19, 0)
+	title.Position = UDim2.new(0.5, 0, 0.03, 0)
+	title.AnchorPoint = Vector2.new(0.5, 0)
+	title.BackgroundTransparency = 1
+	title.Text = entry.Title
+	title.TextScaled = true
+	title.Font = TITLE_FONT
+	title.TextColor3 = THEME.Text
+	title.TextStrokeTransparency = 1
 
-	local name = CloneLabel("Name", row)
-	name.LayoutOrder = 1
-	name.Size = UDim2.new(1, 0, 0.36, 0)
-	name.Text = entry.Title
-	name.TextColor3 = THEME.Text
-	StyleTextStroke(name)
+	-- Icon. Blank until an asset id is filled in on the server.
+	local icon = card:FindFirstChild("Icon")
+	if not icon then
+		icon = Instance.new("ImageLabel")
+		icon.Name = "Icon"
+		icon.Parent = card
+	end
+	icon.Size = UDim2.new(0.34, 0, 0.44, 0)
+	icon.Position = UDim2.new(0.06, 0, 0.26, 0)
+	icon.BackgroundColor3 = THEME.InputBackground
+	icon.BorderSizePixel = 0
+	icon.ScaleType = Enum.ScaleType.Fit
+	if entry.Icon and entry.Icon ~= "" then
+		icon.Image = entry.Icon
+		icon.BackgroundTransparency = 1
+	else
+		icon.Image = ""
+		icon.BackgroundTransparency = 0
+	end
+	GetOrMakeCorner(icon, CONTROL_CORNER)
 
-	local blurb = CloneLabel("Blurb", row)
-	blurb.LayoutOrder = 2
-	blurb.Size = UDim2.new(1, 0, 0.26, 0)
+	local price = card:FindFirstChild("Price")
+	if not price then
+		price = Instance.new("TextLabel")
+		price.Name = "Price"
+		price.Parent = card
+	end
+	price.Size = UDim2.new(0.5, 0, 0.18, 0)
+	price.Position = UDim2.new(0.44, 0, 0.26, 0)
+	price.BackgroundTransparency = 1
+	price.Text = entry.Price or "Gamepass"
+	price.TextScaled = true
+	price.Font = TITLE_FONT
+	price.TextColor3 = THEME.Text
+	price.TextXAlignment = Enum.TextXAlignment.Left
+
+	local blurb = card:FindFirstChild("Blurb")
+	if not blurb then
+		blurb = Instance.new("TextLabel")
+		blurb.Name = "Blurb"
+		blurb.Parent = card
+	end
+	blurb.Size = UDim2.new(0.5, 0, 0.24, 0)
+	blurb.Position = UDim2.new(0.44, 0, 0.46, 0)
+	blurb.BackgroundTransparency = 1
 	blurb.Text = entry.Blurb or ""
+	blurb.TextScaled = false
+	blurb.TextWrapped = true
+	blurb.TextSize = 13
+	blurb.Font = BODY_FONT
 	blurb.TextColor3 = THEME.MutedText
-	StyleTextStroke(blurb)
+	blurb.TextXAlignment = Enum.TextXAlignment.Left
 
-	local buy = row:FindFirstChild("Buy")
+	local buy = card:FindFirstChild("Buy")
 	if not buy then
-		buy = ChangeText:Clone()
+		buy = Instance.new("TextButton")
 		buy.Name = "Buy"
-		buy.Parent = row
+		buy.Parent = card
 		buy.MouseButton1Click:Connect(function()
 			RemoteEvent:FireServer("PromptPurchase", entry.Key)
 		end)
 	end
-	buy.LayoutOrder = 3
-	buy.Size = UDim2.new(0.55, 0, 0.34, 0)
-	buy.Visible = true
+	buy.Size = UDim2.new(0.86, 0, 0.22, 0)
+	buy.Position = UDim2.new(0.5, 0, 0.96, 0)
+	buy.AnchorPoint = Vector2.new(0.5, 1)
+	buy.TextScaled = true
+	buy.Font = TITLE_FONT
+	buy.BorderSizePixel = 0
+	GetOrMakeCorner(buy, CONTROL_CORNER)
 
 	ShopRows[entry.Key] = buy
-	return row
+	ShopEntries[entry.Key] = entry
+	return card
 end
 
 -------------------------------------------------------------------------------
@@ -442,12 +664,16 @@ local function ApplyPassState()
 
 	for key, buy in pairs(ShopRows) do
 		if Passes[key] then
-			SetCaption(buy, "Owned")
-			StyleButton(buy, THEME.OwnedBackground, THEME.OwnedStroke, THEME.OwnedText)
+			buy.Text = "Owned"
+			buy.BackgroundColor3 = THEME.OwnedBackground
+			buy.TextColor3 = THEME.OwnedText
+			StyleBorder(buy, THEME.ShopOutline, 3)
 			buy.AutoButtonColor = false
 		else
-			SetCaption(buy, "Buy")
-			StyleButton(buy, THEME.ButtonBackground, THEME.ButtonStroke, THEME.Text)
+			buy.Text = "Buy"
+			buy.BackgroundColor3 = THEME.BuyBackground
+			buy.TextColor3 = THEME.BuyText
+			StyleBorder(buy, THEME.ShopOutline, 3)
 			buy.AutoButtonColor = true
 		end
 	end
@@ -519,7 +745,7 @@ end
 -- Server messages
 -------------------------------------------------------------------------------
 
-RemoteEvent.OnClientEvent:Connect(function(Argument, Argument2)
+RemoteEvent.OnClientEvent:Connect(function(Argument, Argument2, Argument3)
 	if not Argument then
 		return
 	end
@@ -555,6 +781,31 @@ RemoteEvent.OnClientEvent:Connect(function(Argument, Argument2)
 				Passes[entry.Key] = entry.Owns
 				BuildShopRow(entry, i)
 			end
+
+			-- Argument3 is the category list. Fall back to whatever the items
+			-- themselves declare if an older server does not send it.
+			local cats = Argument3
+			if type(cats) ~= "table" then
+				cats = {}
+				local seen = {}
+				for _, entry in ipairs(Argument2) do
+					local c = entry.Category or "Passes"
+					if not seen[c] then
+						seen[c] = true
+						cats[#cats + 1] = c
+					end
+				end
+			end
+
+			for i, name in ipairs(cats) do
+				BuildTab(name, i)
+			end
+			if not CurrentTab and cats[1] then
+				SelectTab(cats[1])
+			else
+				SelectTab(CurrentTab or cats[1])
+			end
+
 			ApplyPassState()
 		end
 
